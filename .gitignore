@@ -1,0 +1,24 @@
+# fordítási kimenet
+build/
+*.elf
+*.nso
+*.nro
+*.nsp
+*.npdm
+*.nacp
+*.pfs0
+# a játék saját fájljai soha nem kerülnek a repóba
+*.apk
+libPirates.so
+com.gameloft.android.*/
+
+# a játék ikonja (tools/assets/make-icon.py a saját APK-ból) és az Eden-mappa
+/icon.jpg
+/dist/
+
+# helyi munkanapló (állapot, a fejlesztő gépének útvonalai) – nem publikus
+/HANDOFF.md
+# Python- és macOS-szemét
+__pycache__/
+*.pyc
+.DS_Store
