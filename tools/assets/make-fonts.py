@@ -2,8 +2,7 @@
 """Az eredeti (Gameloft) latin betűkészlet 1080p-re nagyítva → hd_eu_font_*.{bsprite,pvr}, hd_eu_font_map.bin
 
 Miért: a 1920×1080-as sprite-csomag (sprites_1920x1080.gla) nem része a Gameloft eredeti csomagjának, és
-annak eu_font_* fontjai nem az eredetiek (utólag újragyártottak): cirill betűk vannak benne, a nyugati ékezetesek (à é ß …)
-hiányoznak, és a méretarányok sem az eredetiek (a „small” nagyobb a „medium”-nál). Az eredeti fontok a
+annak eu_font_* fontjai nem az eredetiek (utólag újragyártottak): a nyugati ékezetesek (à é ß …) hiányoznak, és a méretarányok sem az eredetiek (a „small” nagyobb a „medium”-nál). Az eredeti fontok a
 Gameloft letöltőszerveréről származó 1280×800-as csomagban vannak (sprites_1280x800.gla, DXT5 .dds).
 A játék a fontot nem skálázza (NoScale modulméretek, a sorköz is a modulmagasságból jön), ezért az
 1280×800-as képernyőhöz képest 1080/800 = 1,35-szörös modulokkal ugyanazt az arányt kapjuk, mint az

@@ -209,7 +209,7 @@ static void GS_InGameMenu_Render(void *self) {
 // Betűkészlet: az eredeti Gameloft-fontok 1080p-re nagyítva, a binárisba ágyazva
 //   CCustomFileSystem::createAndOpenFile(char const*):   push {r4-fp, lr}; ldr r5, [pc, #2024]
 //   CTextureManager::getTexture(char const*, char const*): push {r4-fp, lr}; ldr r4, [pc, #852]
-// A sprites_1920x1080.gla eu_font_* fontjai nem a Gameloft eredetijei (cirill betűk, hiányzó à é ß,
+// A sprites_1920x1080.gla eu_font_* fontjai nem a Gameloft eredetijei (hiányzó à é ß,
 // más méretarányok). A make a cache-beli Gameloft-csomagból legyártja az eredetieket (tools/assets/make-fonts.py,
 // hd_ előtaggal), és a binárisba ágyazza (data_install.c: embedded_file); a játék fájlrendszere ezeket
 // memóriafájlként kapja (glitch CFileSystem::createMemoryReadFile – a this-t nem használja).

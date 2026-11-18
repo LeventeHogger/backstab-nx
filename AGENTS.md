@@ -76,7 +76,7 @@ nem verziózott `HANDOFF.md` (ha van); visszafejtett részletek: `docs/visszafej
   → `ControlScheme`: WalkJoystick, kamera, multi-gombok; `AnalogJoystick::MAX_DISTANCE` logikai pixelben), a kamera a
   játék saját forgatás-eseményét küldi, a menük a natív Xperia Play-fókusznavigációt (`menu_action`, `CButton +0x74`).
   Részletek: `source/controls.c` fejléce. Fix (Vita-ból skálázott) érintéspontokra csak tartalékként támaszkodunk.
-- **Az 1080p-s adatcsomag `eu_font_*` fontjai nem eredetiek** (utólag gyártottak: cirill betűk, hiányzó à é ß, a
+- **Az 1080p-s adatcsomag `eu_font_*` fontjai nem eredetiek** (utólag gyártottak: hiányzó à é ß, a
   „small” nagyobb a „medium”-nál). Az eredeti a Gameloft 1280×800-as csomagjában van; a játék a fontot nem skálázza
   (NoScale modulméret, a sorköz is abból), ezért 1080/800-szoros modulokkal pontosan az eredeti arány jön ki.
   A `patch.c` a binárisba ágyazott `hd_` fájlokat adja helyettük memóriafájlként (`CCustomFileSystem::createAndOpenFile`
