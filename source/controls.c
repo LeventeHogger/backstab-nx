@@ -95,6 +95,7 @@ enum { TOUCH_UP = 0, TOUCH_DOWN = 1, TOUCH_MOVE = 2 };
 
 #define LEVEL_INTERFACE  0x90     // CLevel → ILevelInterface*
 #define LEVEL_MINIMAP    0x1b04   // CLevel → CButtonMinimap*
+#define LEVEL_SKIP       0x1af8   // CLevel → az átvezetők Skip-gombja (CLevel::EnableSkipCinematic; 77-es esemény)
 #define IFACE_SCHEME     0x0c     // ILevelInterface → aktív CBaseControlScheme*
 
 #define BTN_RECT         0x08     // short x0, y0, x1, y1
@@ -223,6 +224,14 @@ static inline int l2sy(float ly) { return (int)((floorf(ly) + 0.5f) * sc_h); }
 
 static inline float clampf(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
+// Egy gomb érintési területének közepe képernyő-képpontban; a képernyőn kívül lógó gombnál (pl. a jobb
+// alsó sarok gombjai) a látható részéé.
+static void btn_center(const void *obj, int *sx, int *sy) {
+    const int16_t *r = (const int16_t *)((const uint8_t *)obj + BTN_RECT);
+    *sx = l2sx((clampf(r[0], 0, lw - 1) + clampf(r[2], 0, lw - 1)) / 2);
+    *sy = l2sy((clampf(r[1], 0, lh - 1) + clampf(r[3], 0, lh - 1)) / 2);
+}
+
 // A bal (mozgás) és a jobb (kamera) virtuális joystick Vita-helye és -sugara (tartalék).
 #define LSTICK_X 121.0f
 #define LSTICK_Y 425.0f
@@ -342,6 +351,7 @@ typedef struct {
 } MenuBtn;
 static MenuBtn mbtn[MENU_MAX];         // a mostani állapot fókuszálható gombjai
 static int mbtn_count;
+static int menu_pointable;             // a mostani állapot nem HUD-os érintésfogadói (0: töltő-, címképernyő)
 static int focus_idx = -1;             // a fókuszban lévő gomb indexe (mbtn), -1: nincs
 static void *focus_obj;                // az előző képkocka fókuszgombja (ha több gombon is fókusz van)
 static VTouch focus_touch;             // az A-val lenyomott gomb
@@ -540,6 +550,31 @@ static void send_back(void) {
 #define INGAME_BACK_BTN 0x158
 static const void *vt_ingame_menu;
 static int *open_cf_main_menu;
+
+// Mentésválasztó (GS_SelectSaveSlot, a Continue és a New Game is): a játék a fókuszban lévő mentést
+// jelöli ki (az Update a +0x14-es CMenuButtons fókuszjelzős elemét +0x44-be teszi), indítani a jobb
+// alsó gomb (+0x2c) indít (StartContinueGame; új játéknál foglalt helyre a játék maga kérdez rá:
+// GS_MMConfirm). Érintéssel ez két koppintás; kontrollerrel az A a mentésen rögtön ezt a gombot nyomja.
+#define SAVESLOT_SLOTS 0x14       // CMenuButtons* → std::vector<CButton*> (begin, end)
+#define SAVESLOT_START 0x2c       // CButtonSpr*
+static const void *vt_select_save;
+
+static const uint8_t *saveslot_start(void *state, const void *focused) {
+    if (!state || !vt_select_save || *(const void **)state != vt_select_save)
+        return NULL;
+    char *slots = *(char **)((char *)state + SAVESLOT_SLOTS);
+    if (!slots)
+        return NULL;
+    void *const *b = *(void *const *const *)slots, *const *e = *(void *const *const *)(slots + 4);
+    if (!b || e < b || e - b > 16)
+        return NULL;
+    while (b < e && *b != focused)
+        b++;
+    const uint8_t *start = *(uint8_t **)((char *)state + SAVESLOT_START);
+    if (b == e || !start || !start[BTN_ENABLED] || !start[BTN_VISIBLE])
+        return NULL;
+    return start;
+}
 
 static bool ingame_menu_back(void *state) {
     if (!state || !vt_ingame_menu || !open_cf_main_menu || *(const void **)state != vt_ingame_menu)
@@ -743,7 +778,7 @@ static const struct {
     { "_ZTV17CInventoryDisplay", "CInventoryDisplay", false },
     { "_ZTV16CUpgradesDisplay", "CUpgradesDisplay", false },
     { "_ZTV18CStatisticsDisplay", "CStatisticsDisplay", false },
-    { "_ZTV12CButtonShoot", "CButtonShoot", false },
+    { "_ZTV12CButtonShoot", "CButtonShoot", false },          // innentől a játékmenet HUD-ja
     { "_ZTV12CButtonSweep", "CButtonSweep", false },
     { "_ZTV15CButtonSprMulti", "CButtonSprMulti", false },
     { "_ZTV14CButtonMinimap", "CButtonMinimap", false },
@@ -752,6 +787,7 @@ static const struct {
     { "_ZTV24FullScreenRotateJoystick", "FullScreenRotateJoystick", false },
 };
 #define TOUCH_CLASS_COUNT ((int)(sizeof(touch_class) / sizeof(touch_class[0])))
+#define TOUCH_CLASS_HUD_FIRST 14   // a CButtonShoot sora: a HUD-osztályokra nem kell kurzor
 static const void *touch_class_vt[TOUCH_CLASS_COUNT];
 
 static int touch_class_of(const void *obj) {
@@ -884,15 +920,56 @@ static void menu_log(const char *fmt, ...) {
     va_end(ap);
     log_info("controls: menü: %s", buf);
 }
+
+// Játékmenetben a nem HUD-os érintésfogadók (párbeszéd, átvezető-Skip, felugró gombok) és a CLevel
+// Skip-gombja, ha a halmazuk vagy az engedélyezettségük megváltozott.
+static uint32_t play_log_sig;
+
+static void play_dump(void *state) {
+    if (!state || menu_log_lines >= 800)
+        return;
+    void *level = CLevel_GetLevel();
+    const uint8_t *skip = level ? *(uint8_t **)((char *)level + LEVEL_SKIP) : NULL;
+    uint32_t sig = skip ? (uint32_t)(uintptr_t)skip * 31 + skip[BTN_ENABLED] * 2 + skip[BTN_VISIBLE] : 0;
+    char *sentinel = (char *)state + STATE_TOUCH_LIST;
+    void **node;
+    int n = 0;
+    for (node = *(void ***)sentinel; node && (char *)node != sentinel && n < 512; node = (void **)node[0], n++) {
+        const uint8_t *b = node[2];
+        int cls = b ? touch_class_of(b) : -2;
+        if (b && (cls < 0 || touch_class[cls].focusable))
+            sig = sig * 31 + (uint32_t)(uintptr_t)b + b[BTN_ENABLED] * 2 + b[BTN_VISIBLE];
+    }
+    if (sig == play_log_sig)
+        return;
+    play_log_sig = sig;
+    log_info("controls: játék: %d érintésfogadó; Skip %p en%d vis%d", n, (void *)skip, skip ? skip[BTN_ENABLED] : -1,
+             skip ? skip[BTN_VISIBLE] : -1);
+    n = 0;
+    for (node = *(void ***)sentinel; node && (char *)node != sentinel && n < 512; node = (void **)node[0], n++) {
+        const uint8_t *b = node[2];
+        int cls = b ? touch_class_of(b) : -2;
+        if (!b || (cls >= 0 && !touch_class[cls].focusable))
+            continue;
+        const int16_t *r = (const int16_t *)(b + BTN_RECT);
+        log_info("controls:   %p %s (vtábla 0x%x) rect (%d,%d)-(%d,%d) en%d vis%d esemény %d", (void *)b,
+                 cls >= 0 ? touch_class[cls].name : "?", (unsigned)((uintptr_t)*(void **)b - so_mod.base - 8), r[0],
+                 r[1], r[2], r[3], b[BTN_ENABLED], b[BTN_VISIBLE], *(const int *)(b + 0x98));
+        if (++menu_log_lines >= 800)
+            break;
+    }
+}
 #else
 #define menu_dump(state, sig, listeners) ((void)(state), (void)(sig), (void)(listeners))
 #define menu_log(...) do {} while (0)
+#define play_dump(state) ((void)(state))
 #endif
 
 // A mostani állapot fókuszálható gombjai (engedélyezett, látható, a képernyőn lévő).
 static void menu_scan(void *state) {
     mbtn_count = 0;
     focus_idx = -1;
+    menu_pointable = 0;
     if (!state || !menu_action)
         return;
     uint32_t sig = (uint32_t)(uintptr_t)state;
@@ -906,6 +983,8 @@ static void menu_scan(void *state) {
         listeners++;
         sig = sig * 31 + (uint32_t)(uintptr_t)obj;
         int cls = touch_class_of(obj);
+        if (cls < TOUCH_CLASS_HUD_FIRST)
+            menu_pointable++;   // az ismeretlen osztály (-1) is
         if (cls < 0 || !touch_class[cls].focusable)
             continue;
         const uint8_t *b = obj;
@@ -1126,12 +1205,161 @@ static void poll_menu(u64 buttons, u64 down, u64 up, HidAnalogStickState ls, uin
         } else if (mbtn[focus_idx].tap) {
             const MenuBtn *m = &mbtn[focus_idx];
             int sx = l2sx((m->x0 + m->x1) / 2), sy = l2sy((m->y0 + m->y1) / 2);
+            const uint8_t *start = saveslot_start(cur_state, m->obj);
+            if (start)
+                btn_center(start, &sx, &sy);
             vtouch_press(&focus_touch, PTR_FOCUS, sx, sy);
-            menu_log("A → %p, képernyő (%d,%d)", m->obj, sx, sy);
+            menu_log("A → %p%s, képernyő (%d,%d)", m->obj, start ? " (mentés: az indító gomb)" : "", sx, sy);
         }
     }
     if (up & HidNpadButton_A)
         vtouch_release(&focus_touch, PTR_FOCUS);
+}
+
+// ---------------------------------------------------------------------------
+// Átvezetők: amíg a CLevel Skip-gombja él (CLevel::EnableSkipCinematic), a játékos nem irányít, a HUD
+// gombjai tiltva vannak. Ilyenkor az A a Skip (az egész átvezető átugrása, 77-es esemény), a B a
+// párbeszéd következő sora (a CDialogTextBox koppintásra a sor végére ugrik, illetve a következőre lép).
+// Játék közbeni párbeszédnél (Skip nélkül) a gombok maradnak a játékéi.
+
+#define TOUCH_CLASS_SPR    1      // a touch_class[] CButtonSpr-sora (a Skip-gomb osztálya)
+#define TOUCH_CLASS_DIALOG 5      // a touch_class[] CDialogTextBox-sora
+
+static bool live_button(const uint8_t *b, int cls) {
+    if (!b || touch_class_of(b) != cls || !b[BTN_ENABLED] || !b[BTN_VISIBLE])
+        return false;
+    const int16_t *r = (const int16_t *)(b + BTN_RECT);
+    return r[2] > r[0] && r[3] > r[1] && r[2] > 0 && r[3] > 0 && r[0] < lw && r[1] < lh;
+}
+
+static const uint8_t *cinematic_skip(void) {
+    void *level = CLevel_GetLevel();
+    const uint8_t *s = level ? *(uint8_t **)((char *)level + LEVEL_SKIP) : NULL;
+    return live_button(s, TOUCH_CLASS_SPR) ? s : NULL;
+}
+
+static const uint8_t *dialog_box(void *state) {
+    if (!state)
+        return NULL;
+    char *sentinel = (char *)state + STATE_TOUCH_LIST;
+    void **node = *(void ***)sentinel;
+    for (int n = 0; node && (char *)node != sentinel && n < 512; node = (void **)node[0], n++)
+        if (live_button(node[2], TOUCH_CLASS_DIALOG))
+            return node[2];
+    return NULL;
+}
+
+// Átvezetőben a logikai gombhoz tartozó koppintási pont; hamis, ha nincs átvezető vagy a gombnak itt
+// nincs szerepe.
+static bool cinematic_point(int vb, int *sx, int *sy) {
+    if (vb != VB_COUNTER && vb != VB_JUMP)
+        return false;
+    const uint8_t *skip = cinematic_skip();
+    if (!skip)
+        return false;
+    const uint8_t *target = vb == VB_COUNTER ? skip : dialog_box(cur_state);
+    if (!target)
+        return false;
+    btn_center(target, sx, sy);
+    menu_log("átvezető: %s → %p, képernyő (%d,%d)", vb == VB_COUNTER ? "A = Skip" : "B = következő sor",
+             (const void *)target, *sx, *sy);
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Gombjelek a játék saját feliratain (a patch.c Draw-hookjai rajzolják, lásd port.h): melyik gombot
+// melyik kontrollergomb nyomja. Képkockánként újraszámolva, csak a mostani képernyő gombjaira.
+//  - B: a szünetmenü alfülein a Back, a főfülén a Resume (a Vissza ott az egész menüt zárja), máshol a
+//    bal alsó sarok gombja (a menük vissza-nyila); átvezetőben a párbeszéd (következő sor).
+//  - A: a kijelölt (fókuszban lévő) gomb, a mentésválasztó indító gombja (ha a fókusz egy mentésen van),
+//    átvezetőben a Skip.
+//  - L/R: a szünetmenü fülsorának két szélső füle (mellé, kívülre).
+
+#define INGAME_RESUME_BTN 0x48
+#define LABEL_MAX 6
+static struct { const void *obj; uint16_t glyph; } label[LABEL_MAX];
+static int label_count;
+
+static void label_add(const void *obj, uint16_t glyph) {
+    if (obj && label_count < LABEL_MAX) {
+        label[label_count].obj = obj;
+        label[label_count++].glyph = glyph;
+    }
+}
+
+uint16_t controls_button_glyph(const void *obj) {
+    for (int i = 0; i < label_count; i++)
+        if (label[i].obj == obj)
+            return label[i].glyph;
+    return 0;
+}
+
+// A B célgombja a mostani menüképernyőn (a menu_scan után), vagy NULL. A megerősítő ablakokban a Vissza
+// ugyanazt teszi, mint a „No” (PopState): GS_Confirm::Update – a +0x2c-es gomb (a +0x30-as a „Yes”);
+// GS_MMConfirm::Update – a +0x14-es CMenuButtons 1-es eleme.
+#define CONFIRM_NO_BTN   0x2c
+#define MMCONFIRM_BTNS   0x14
+static const void *vt_confirm, *vt_mmconfirm;
+
+static const void *back_button(void *state) {
+    const void *vt = state ? *(const void **)state : NULL;
+    if (vt && vt == vt_confirm) {
+        const uint8_t *no = *(uint8_t **)((char *)state + CONFIRM_NO_BTN);
+        return no && no[BTN_ENABLED] ? no : NULL;
+    }
+    if (vt && vt == vt_mmconfirm) {
+        char *mb = *(char **)((char *)state + MMCONFIRM_BTNS);
+        void *const *b = mb ? *(void *const *const *)mb : NULL, *const *e = mb ? *(void *const *const *)(mb + 4) : NULL;
+        const uint8_t *no = b && e - b >= 2 ? b[1] : NULL;
+        return no && no[BTN_ENABLED] ? no : NULL;
+    }
+    if (state && vt_ingame_menu && *(const void **)state == vt_ingame_menu) {
+        const uint8_t *back = *(uint8_t **)((char *)state + INGAME_BACK_BTN);
+        if (back && back[BTN_ENABLED])
+            return back;
+        const uint8_t *resume = *(uint8_t **)((char *)state + INGAME_RESUME_BTN);
+        return live_button(resume, TOUCH_CLASS_SPR) ? resume : NULL;
+    }
+    for (int i = 0; i < mbtn_count; i++)
+        if (mbtn[i].x0 <= 2 && mbtn[i].y1 >= lh - 2 && touch_class_of(mbtn[i].obj) == TOUCH_CLASS_SPR)
+            return mbtn[i].obj;
+    return NULL;
+}
+
+static void labels_update(void) {
+    label_count = 0;
+    if (!menu_mode) {
+        const uint8_t *skip = cinematic_skip();
+        if (skip) {
+            label_add(skip, GLYPH_A);
+            label_add(dialog_box(cur_state), GLYPH_B);
+        }
+        return;
+    }
+    label_add(back_button(cur_state), GLYPH_B);   // elöl: ha a fókusz épp a vissza-gombon van, az B marad
+    // a fülsor (a szünetmenü teteje): legalább két, a képernyő felső szélén álló fül-lap; a bal szélsőre L, a
+    // jobb szélsőre R (a rejtett, (-8,-10)-es fül-lapok kimaradnak)
+    const MenuBtn *first = NULL, *last = NULL;
+    int n = 0;
+    for (int i = 0; i < mbtn_count; i++) {
+        const MenuBtn *m = &mbtn[i];
+        if (touch_class_of(m->obj) != TAB_CLASS || m->y0 != 0 || m->x0 < 0 || m->y1 < 20)
+            continue;
+        if (!first || m->x0 < first->x0)
+            first = m;
+        if (!last || m->x1 > last->x1)
+            last = m;
+        n++;
+    }
+    if (n >= 2) {
+        label_add(first->obj, GLYPH_L);
+        label_add(last->obj, GLYPH_R);
+    }
+    if (!menu_cursor && focus_idx >= 0 && focus_idx < mbtn_count) {
+        if (mbtn[focus_idx].tap)
+            label_add(mbtn[focus_idx].obj, GLYPH_A);   // a kijelölt gomb (csak ha van felirata, patch.c)
+        label_add(saveslot_start(cur_state, mbtn[focus_idx].obj), GLYPH_A);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1247,8 +1475,11 @@ static void poll_gameplay(u32 vb_now, u64 down, u64 up, HidAnalogStickState ls, 
 
     for (int i = 0; i < VB_COMBO; i++) {
         bool combo_part = combo_active && (i == VB_FIRE || i == VB_ATTACK);
+        int cx, cy;
         if (vb_down & VB_BIT(i)) {
-            if (combo_part || (vengeance && (i == VB_COUNTER || i == VB_INTERACT))) {
+            if (cinematic_point(i, &cx, &cy)) {
+                vtouch_press(&vbtn[i], PTR_BUTTON + i, cx, cy);   // felengedés lent, ugyanott
+            } else if (combo_part || (vengeance && (i == VB_COUNTER || i == VB_INTERACT))) {
                 // kombó alatt / bosszú-lehetőségnél (a ○ és △ helyén a bosszú-gomb van) nem koppint
             } else if (aim && i == VB_INTERACT) {
                 // célzás közben a △ a következő gránát/fegyver (a Vitán is)
@@ -1385,9 +1616,16 @@ void controls_init(void) {
 
     menu_action = game_sym_opt("menu_action");   // nélküle csak a szabad kurzor marad
     vt_ingame_menu = game_vtable("_ZTV13GS_InGameMenu");
+    vt_select_save = game_vtable("_ZTV17GS_SelectSaveSlot");
+    vt_confirm = game_vtable("_ZTV10GS_Confirm");
+    vt_mmconfirm = game_vtable("_ZTV12GS_MMConfirm");
     open_cf_main_menu = game_sym_opt("is_open_cf_main_menu_screen");
     for (int i = 0; i < TOUCH_CLASS_COUNT; i++)
         touch_class_vt[i] = game_vtable(touch_class[i].sym);
+    if (strcmp(touch_class[TAB_CLASS].name, "CTab") || strcmp(touch_class[TOUCH_CLASS_SPR].name, "CButtonSpr") ||
+        strcmp(touch_class[TOUCH_CLASS_DIALOG].name, "CDialogTextBox") ||
+        strcmp(touch_class[TOUCH_CLASS_HUD_FIRST].name, "CButtonShoot"))
+        fatal_error("controls: a touch_class[] sorrendje nem egyezik a *_CLASS indexekkel");
 
     update_scale();
     cur_x = screen_width / 2.0f;
@@ -1528,8 +1766,10 @@ void controls_poll(void) {
         // az új HUD-ra nyomunk le.
         if (hud_update())
             release_all_virtual();
+        play_dump(cur_state);
         poll_gameplay(vb_now, down, up, ls, rs, now, dt);
     }
+    labels_update();
 
     vb_prev = vb_now;
 }
@@ -1548,9 +1788,10 @@ bool controls_focus_rect(int *x, int *y, int *w, int *h) {
 bool controls_cursor(int *x, int *y) {
     if (!menu_mode || !menu_cursor)
         return false;
-    // Dokkolva mindig látszik; kézi módban (ahol ujjal is lehet) csak ha a kart használták az utóbbi 4 mp-ben.
+    // Dokkolva látszik, ha van mire mutatni (R3-ra mindig); kézi módban (ahol ujjal is lehet), és ahol nincs
+    // érintésfogadó (töltő-, címképernyő: ott bárhova koppinthat az A), csak ha a kart használták az utóbbi 4 mp-ben.
     bool docked = appletGetOperationMode() == AppletOperationMode_Console;
-    if (!docked && (cur_active_ms == 0 || time_ms() - cur_active_ms > 4000))
+    if (!(docked && (menu_pointable > 0 || cursor_forced)) && (cur_active_ms == 0 || time_ms() - cur_active_ms > 4000))
         return false;
     *x = (int)cur_x;
     *y = (int)cur_y;

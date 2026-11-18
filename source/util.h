@@ -29,6 +29,19 @@ void log_printf(const char *level, const char *fmt, ...) __attribute__((format(p
 void fatal_error(const char *fmt, ...) __attribute__((noreturn, format(printf, 1, 2)));
 
 uint64_t time_ms(void);
+
+// Betöltési mérés: a patch.c a GS_Loading létrejöttekor nullázza, a megszűnésekor naplózza (kiadásban is,
+// hogy valódi gépen is látsszon, mire megy el az idő). Csak időt mér, a működéshez nem nyúl.
+typedef struct {
+    uint64_t io_ticks, shader_ticks, tex_ticks;   // rendszer-tick (perf_ms váltja)
+    uint64_t swap_ticks;                          // eglSwapBuffers (a vsync-re várás is)
+    uint64_t pvr_ticks;                           // a játék PVRTC-kibontása (PVRTCDecompress)
+    uint64_t io_bytes;
+    uint32_t opens, reads, shaders, textures, frames, pvrs;
+} PerfStats;
+extern PerfStats perf;
+uint64_t perf_tick(void);
+uint32_t perf_ms(uint64_t ticks);
 int file_exists(const char *path);
 // A szülőkönyvtárak létrehozása (mkdir -p a fájl könyvtárára).
 void mkpath(const char *path);

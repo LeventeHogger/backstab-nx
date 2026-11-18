@@ -63,6 +63,16 @@ uint64_t time_ms(void) {
     return armTicksToNs(armGetSystemTick()) / 1000000ULL;
 }
 
+PerfStats perf;
+
+uint64_t perf_tick(void) {
+    return armGetSystemTick();
+}
+
+uint32_t perf_ms(uint64_t ticks) {
+    return (uint32_t)(armTicksToNs(ticks) / 1000000ULL);
+}
+
 int file_exists(const char *path) {
     struct stat st;
     return stat(path, &st) == 0;

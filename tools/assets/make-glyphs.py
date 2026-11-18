@@ -25,7 +25,21 @@ GLYPHS = {
     311: (191, 601, 13, 12, "A"),        # kis ○
     256: (262, 601, 37, 10, "+"),        # START  → +
     255: (457, 608, 46, 10, "-"),        # SELECT → −
+    # Az Xperia D-pad karjai (pajzs alakú nyíl) → a bal Joy-Con kerek iránygombjai: a tippek (mászás, mozgás,
+    # párkány) a karokat tükrözve, rombuszba rakják össze, ami épp a Joy-Con elrendezése. „g”: a kiemelt
+    # (aranyszín fényudvaros) változat, ahogy az eredeti 234/237 is.
+    233: (1443, 1926, 43, 37, "dpad<"),  # vízszintes kar (◁; tükrözve jobbra)
+    234: (1721, 1923, 50, 44, "dpad<g"),
+    236: (83, 1925, 38, 42, "dpad^"),    # függőleges kar (△; tükrözve lefelé)
+    237: (0, 1875, 46, 50, "dpad^g"),
+    249: (964, 1461, 86, 85, "stick"),   # az Xperia érintőpadja (nézelődés, mozgás) → analóg kar
 }
+
+# a játék gombjainak színei (az interface.pvr 240-es moduljából mérve)
+BTN_FILL = (198, 198, 198, 255)
+BTN_RING = (123, 121, 129, 255)
+BTN_RIM = (228, 214, 183, 255)
+GLOW = (255, 202, 82)
 
 
 def strokes(ch, w, h):
@@ -47,7 +61,52 @@ def strokes(ch, w, h):
     raise ValueError(ch)
 
 
+def render_button(kind, w, h):
+    """Teljes modul: kerek gomb (iránynyíllal) vagy analóg kar, a játék gombjainak stílusában."""
+    import math
+    W, H = w * SS, h * SS
+    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    cx, cy = W / 2, H / 2
+    full = min(W, H) / 2
+    glow = kind.endswith("g") or kind == "stick"
+    rb = full * (0.62 if glow else 0.9)    # a gomb sugara (a fényudvar nélkül)
+    if glow:                               # aranyszín fényudvar, kifelé halványodva
+        for k in range(48, 0, -1):
+            r = rb + (full - rb) * k / 48
+            a = int(170 * (1 - k / 48) ** 1.6)
+            d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=GLOW + (a,))
+    d.ellipse((cx - rb, cy - rb, cx + rb, cy + rb), fill=BTN_RIM)
+    r = rb * 0.86
+    d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=BTN_RING)
+    r = rb * 0.76
+    d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=BTN_FILL)
+    if kind.startswith("dpad"):            # tömör nyílhegy a gomb közepén
+        a = rb * 0.42
+        if "<" in kind:
+            pts = [(cx - a, cy), (cx + a * 0.7, cy - a * 0.95), (cx + a * 0.7, cy + a * 0.95)]
+        else:
+            pts = [(cx, cy - a), (cx - a * 0.95, cy + a * 0.7), (cx + a * 0.95, cy + a * 0.7)]
+        d.polygon(pts, fill=INK)
+    else:                                  # kar: sötétebb sapka, rajta recés gyűrű és fény
+        r = rb * 0.56
+        d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=(96, 96, 100, 255))
+        r2 = rb * 0.44
+        d.ellipse((cx - r2, cy - r2, cx + r2, cy + r2), outline=(150, 150, 154, 255), width=max(1, int(rb * 0.05)))
+        for k in range(16):
+            t = 2 * math.pi * k / 16
+            x0, y0 = cx + math.cos(t) * r2 * 0.75, cy + math.sin(t) * r2 * 0.75
+            x1, y1 = cx + math.cos(t) * r * 0.95, cy + math.sin(t) * r * 0.95
+            d.line((x0, y0, x1, y1), fill=(70, 70, 74, 255), width=max(1, int(rb * 0.03)))
+        r3 = rb * 0.16
+        d.ellipse((cx - r3 - rb * 0.12, cy - r3 - rb * 0.12, cx + r3 - rb * 0.12, cy + r3 - rb * 0.12),
+                  fill=(140, 140, 146, 255))
+    return img.resize((w, h), Image.LANCZOS)
+
+
 def render(ch, w, h):
+    if ch.startswith("dpad") or ch == "stick":
+        return render_button(ch, w, h)
     W, H = w * SS, h * SS
     side = min(W, H)                       # a betűk négyzetben, középre; a +/− a teljes magasságban
     ox, oy = (W - side) / 2, (H - side) / 2

@@ -141,11 +141,14 @@ static int mode_creates(const char *mode) {
 FILE *bionic_fopen(const char *path, const char *mode) {
     char buf[PATH_BUF];
     const char *p = bionic_path(path, buf, sizeof(buf));
+    uint64_t t = perf_tick();
     FILE *f = fopen(p, mode);
     if (!f && errno == ENOENT && mode_creates(mode)) {
         mkpath(p);
         f = fopen(p, mode);
     }
+    perf.io_ticks += perf_tick() - t;
+    perf.opens++;
     log_debug("[io] fopen(%s, %s): %p", p, mode, (void *)f);
     return f;
 }
@@ -177,7 +180,12 @@ int bionic_setvbuf(FILE *fp, char *buf, int mode, size_t size) {
 }
 
 size_t bionic_fread(void *ptr, size_t size, size_t n, FILE *fp) {
-    return fread(ptr, size, n, bionic_fix_fp(fp));
+    uint64_t t = perf_tick();
+    size_t r = fread(ptr, size, n, bionic_fix_fp(fp));
+    perf.io_ticks += perf_tick() - t;
+    perf.io_bytes += (uint64_t)r * size;
+    perf.reads++;
+    return r;
 }
 
 size_t bionic_fwrite(const void *ptr, size_t size, size_t n, FILE *fp) {
@@ -185,7 +193,10 @@ size_t bionic_fwrite(const void *ptr, size_t size, size_t n, FILE *fp) {
 }
 
 int bionic_fseek(FILE *fp, long off, int whence) {
-    return fseek(bionic_fix_fp(fp), off, whence);
+    uint64_t t = perf_tick();
+    int r = fseek(bionic_fix_fp(fp), off, whence);
+    perf.io_ticks += perf_tick() - t;
+    return r;
 }
 
 long bionic_ftell(FILE *fp) {

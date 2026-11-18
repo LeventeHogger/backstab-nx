@@ -22,6 +22,8 @@
 #include "util.h"
 
 static EGLDisplay s_display = EGL_NO_DISPLAY;
+static int s_interval = 2;              // a beállítás szerinti swap interval (gl_init)
+static bool s_fast, s_fast_applied;    // pályatöltés: nincs vsync-várakozás (gl_set_fast_frames)
 static EGLContext s_context = EGL_NO_CONTEXT;
 static EGLSurface s_surface = EGL_NO_SURFACE;
 
@@ -81,7 +83,7 @@ void gl_init(void) {
     EGL_CHECK(eglMakeCurrent(s_display, s_surface, s_surface, s_context), "eglMakeCurrent");
 
     // 30 fps-es korlát = minden második vsync; 60 és „nincs korlát” = minden vsync.
-    int interval = settings.fps_lock == 30 ? 2 : 1;
+    int interval = s_interval = settings.fps_lock == 30 ? 2 : 1;
     if (!eglSwapInterval(s_display, interval))
         log_error("eglSwapInterval(%d) nem sikerült (0x%04x)", interval, (unsigned)eglGetError());
 
@@ -198,15 +200,32 @@ static void write_shot(void) {
 }
 #endif
 
+// Pályatöltés alatt a játék 1000 fps-re emeli a célját (GS_Loading::Update → SetTargetFPS), hogy a
+// képkockánként egy CLevel::LoadStep minél sűrűbben fusson; a vsync-re várás (swap interval 2 = 33 ms)
+// minden lépést kivárna. Ilyenkor nem várunk a vsync-re (a patch.c SetTargetFPS-hookja kapcsolja).
+void gl_set_fast_frames(bool fast) {
+    s_fast = fast;
+}
+
 void gl_swap(void) {
     static unsigned fails;
+    if (s_fast != s_fast_applied && s_display != EGL_NO_DISPLAY) {
+        s_fast_applied = s_fast;
+        int iv = s_fast ? 0 : s_interval;
+        if (!eglSwapInterval(s_display, iv))
+            log_error("eglSwapInterval(%d) nem sikerült (0x%04x)", iv, (unsigned)eglGetError());
+        log_debug("gl: swap interval %d (%s)", iv, s_fast ? "pályatöltés" : "játék");
+    }
     draw_cursor();
 #ifdef DEBUG
     if (shot_name[0])
         write_shot();
 #endif
+    uint64_t t = perf_tick();
     if (!eglSwapBuffers(s_display, s_surface) && fails++ < 5)
         log_error("eglSwapBuffers: 0x%x", eglGetError());
+    perf.swap_ticks += perf_tick() - t;
+    perf.frames++;
 #ifdef DEBUG
     // képkockaszám-napló (5 mp-enként), hogy a naplóból is látszódjon, él-e a render-ciklus
     static unsigned frames;

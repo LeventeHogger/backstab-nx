@@ -92,8 +92,8 @@ Kész csomag a saját fájljaidból (SD-mappa + NSP + lépésenkénti útmutató
 |---|---|---|
 | bal kar / D-pad | mozgás (kis kitérés: séta, teljes: futás) | lépés a gombok között |
 | jobb kar | kamera | – |
-| A | kontra (helyzettől függően interakció, bosszú) | a kijelölt gomb |
-| B | ugrás | vissza (a szünetmenü alfülein egy szinttel) |
+| A | kontra (helyzettől függően interakció, bosszú); átvezetőben: Skip | a kijelölt gomb (a mentésválasztón rögtön indít) |
+| B | ugrás; átvezetőben: a párbeszéd következő sora | vissza (a szünetmenü alfülein egy szinttel) |
 | Y | kard | – |
 | X | interakció; nyomva tartva ló hívása; célzás közben következő gránát | – |
 | ZL / L | célzás | L: előző fül |
@@ -102,6 +102,9 @@ Kész csomag a saját fájljaidból (SD-mappa + NSP + lépésenkénti útmutató
 | − | térkép | – |
 | + | szünetmenü | – |
 | R3 | szabad kurzor be/ki | szabad kurzor be/ki (ahol nincs kijelölhető gomb, magától jön) |
+
+A menükben és az átvezetőkben a gombok felirata mellett a játék saját stílusában látszik a kontrollergomb
+(B a vissza-gombon, A az indításon és a Skipen, L/R a szünetmenü fülsorának két végén).
 
 ## Beállítások
 
@@ -264,8 +267,8 @@ A ready-made package from your own files (SD folder + NSP + step-by-step guide i
 |---|---|---|
 | left stick / D-pad | move (slight tilt: walk, full: run) | move between buttons |
 | right stick | camera | – |
-| A | counter (depending on context: interact, vengeance) | press the selected button |
-| B | jump | back (one level up in the pause menu's sub-tabs) |
+| A | counter (depending on context: interact, vengeance); in cutscenes: Skip | press the selected button (starts the game right away on the save slot screen) |
+| B | jump; in cutscenes: next line of dialogue | back (one level up in the pause menu's sub-tabs) |
 | Y | sword | – |
 | X | interact; hold to call the horse; while aiming: next grenade | – |
 | ZL / L | aim | L: previous tab |
@@ -274,6 +277,9 @@ A ready-made package from your own files (SD folder + NSP + step-by-step guide i
 | − | map | – |
 | + | pause menu | – |
 | R3 | free cursor on/off | free cursor on/off (appears automatically where there is no selectable button) |
+
+In menus and cutscenes the controller button is shown next to the button labels, in the game's own style
+(B on the back button, A on start and Skip, L/R at both ends of the pause menu's tab bar).
 
 ### Settings
 

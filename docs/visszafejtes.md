@@ -54,6 +54,28 @@ A port a játék saját, futásidejű adatszerkezeteire épül. Ezek az eltolás
   +0x158 Back (alfüleken). Az Android BACK (`Handle_dv_key(4)`) az egész menüt zárja, az
   `is_open_cf_main_menu_screen` egy szintet lép.
 - **HUD és érintés:** 480×320-as logikai koordinátában; a részletes mezőtérkép a `source/controls.c` fejlécében.
+- **Mentésválasztó** (`GS_SelectSaveSlot`): +0x14 `CMenuButtons` (a mentések), +0x28 vissza, +0x2c indító gomb
+  (`StartContinueGame`), +0x44 a kijelölt mentés; az Update a kijelölést a fókuszjelzős (`CButton`+0x74) elemhez
+  igazítja. Új játéknál foglalt helyre a `GS_MMConfirm` kérdez rá.
+- **Megerősítő ablakok:** `GS_Confirm` +0x30 „Yes”, +0x2c „No” (PopState, a Vissza is ezt teszi); `GS_MMConfirm`
+  +0x14 `CMenuButtons`: 0 „Yes”, 1 „No”.
+- **Átvezetők:** a `CLevel`+0x1af8 Skip-gomb (`EnableSkipCinematic`, 77-es esemény) az egész átvezetőt ugorja; a
+  párbeszéd (`CDialogTextBox`, `ILevelMessage`) koppintásra a sor végére, illetve a következő sorra lép.
+- **Gombfeliratok** (a `Draw`-ok `CFont::DrawString`-hívásai): `CButtonSpr` szöveg +0x88, betű +0x84, horgony +0x9c;
+  `CButtonAnim` +0x98, +0x9c, +0xb0; `CButtonText` +0x80, +0x84, +0x8c. Betűk: `CSpriteManager::GetFont(s_FontSmall…)`;
+  a `DrawString` x/y logikai képpont, a `GetStringSize` képernyő-képpontot ad.
+- **Szövegbe ágyazott gombjelek** (`\x02<képkocka>`, az `interface.bsprite` képkockái; a képkocka-tábla: modulonkénti
+  `u8` darabszám 0x2616-tól, a modulindexek `u16`-tömbje 0xc70-től): 327 ×, 330 □, 333 △, 336 ○ (a 240-es
+  alapgombon a 250–253-as jel), 340 SELECT, 348/351 L/R (246 + 257/258), 321/408/363/362/405 a D-pad karjai
+  (233/234/236/237, a játék tükrözve rakja össze), 354/397 az érintőpad (249). A 429–448 az érintéses HUD ikonjai.
+
+## Betöltés
+- A `GS_Loading::Update` képkockánként egy `CLevel::LoadStep`-et futtat, és közben `SetTargetFPS(1000)`-re vált
+  (a `Release` 30-ra állítja vissza): az eredeti app a lépéseket a lehető leggyorsabban akarja. A port ilyenkor
+  nem vár vsync-re (`gl.c` `gl_set_fast_frames`).
+- A betöltés idejének nagy része a PVRTC-textúrák szoftveres kibontása (`PVRTCDecompress` 0x425b60, a régi PowerVR
+  SDK 2.x képpontonkénti `Decompress`-e): Edenben 30 mp a 35-ből, 192 textúra (a 25-ös helyszín). Fájlolvasás 0,6 mp,
+  shader 0,07 mp, textúrafeltöltés 1,4 mp (a kiadási napló `betöltés:` sora).
 
 ## Az eredeti Gameloft-csomag
 - A játék eredetileg az első induláskor töltötte le az eszközéhez illő adatcsomagot. A Tegra-változat

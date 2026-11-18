@@ -504,6 +504,49 @@ static GLint dbg_glGetUniformLocation(GLuint prog, const GLchar *name) {
 }
 #endif
 
+// Betöltési mérés (util.h perf): a shaderfordítás/-linkelés és a textúrafeltöltés ideje, mindkét buildben
+// (a GS_Loading végén a patch.c naplózza).
+static void perf_glCompileShader(GLuint sh) {
+    uint64_t t = perf_tick();
+#ifdef DEBUG
+    dbg_glCompileShader(sh);
+#else
+    glCompileShader(sh);
+#endif
+    perf.shader_ticks += perf_tick() - t;
+    perf.shaders++;
+}
+
+static void perf_glLinkProgram(GLuint prog) {
+    uint64_t t = perf_tick();
+#ifdef DEBUG
+    dbg_glLinkProgram(prog);
+#else
+    glLinkProgram(prog);
+#endif
+    perf.shader_ticks += perf_tick() - t;
+}
+
+static void perf_glTexImage2D(GLenum target, GLint level, GLint ifmt, GLsizei w, GLsizei h, GLint border,
+                              GLenum fmt, GLenum type, const void *px) {
+    uint64_t t = perf_tick();
+#ifdef DEBUG
+    dbg_glTexImage2D(target, level, ifmt, w, h, border, fmt, type, px);
+#else
+    glyphs_glTexImage2D(target, level, ifmt, w, h, border, fmt, type, px);
+#endif
+    perf.tex_ticks += perf_tick() - t;
+    perf.textures++;
+}
+
+static void perf_glCompressedTexImage2D(GLenum target, GLint level, GLenum ifmt, GLsizei w, GLsizei h,
+                                        GLint border, GLsizei size, const void *data) {
+    uint64_t t = perf_tick();
+    glCompressedTexImage2D(target, level, ifmt, w, h, border, size, data);
+    perf.tex_ticks += perf_tick() - t;
+    perf.textures++;
+}
+
 #define DIRECT(name)   { #name, (uintptr_t)&name }
 #define WRAP(name, fn) { #name, (uintptr_t)&fn }
 
@@ -750,12 +793,8 @@ static const so_default_dynlib dynlib[] = {
     DIRECT(glClearDepthf),
     DIRECT(glClearStencil),
     DIRECT(glColorMask),
-#ifdef DEBUG
-    WRAP(glCompileShader, dbg_glCompileShader),
-#else
-    DIRECT(glCompileShader),
-#endif
-    DIRECT(glCompressedTexImage2D),
+    WRAP(glCompileShader, perf_glCompileShader),
+    WRAP(glCompressedTexImage2D, perf_glCompressedTexImage2D),
     DIRECT(glCompressedTexSubImage2D),
     DIRECT(glCopyTexSubImage2D),
 #ifdef DEBUG
@@ -822,11 +861,7 @@ static const so_default_dynlib dynlib[] = {
     DIRECT(glGetUniformLocation),
 #endif
     DIRECT(glLineWidth),
-#ifdef DEBUG
-    WRAP(glLinkProgram, dbg_glLinkProgram),
-#else
-    DIRECT(glLinkProgram),
-#endif
+    WRAP(glLinkProgram, perf_glLinkProgram),
     DIRECT(glPixelStorei),
     DIRECT(glPolygonOffset),
     DIRECT(glReadPixels),
@@ -839,11 +874,7 @@ static const so_default_dynlib dynlib[] = {
     WRAP(glShaderSource, fix_glShaderSource),   // a Mesán le nem forduló játék-shaderek javítása (gl_fix.c)
 #endif
     DIRECT(glStencilMask),
-#ifdef DEBUG
-    WRAP(glTexImage2D, dbg_glTexImage2D),      // napló + glyphs_glTexImage2D
-#else
-    WRAP(glTexImage2D, glyphs_glTexImage2D),   // Switch-gombjelek, lásd glyphs.c
-#endif
+    WRAP(glTexImage2D, perf_glTexImage2D),     // időmérés + Switch-gombjelek (glyphs.c); debugban napló is
     DIRECT(glTexParameterf),
     DIRECT(glTexParameteri),
     DIRECT(glTexSubImage2D),

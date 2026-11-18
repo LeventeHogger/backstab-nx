@@ -168,6 +168,13 @@ static bool skip_pressed(PadState *pad) {
 void video_play_intro(void) {
     if (!file_exists(INTRO_PATH))
         return;
+#ifdef DEBUG
+    // gépelés nélküli tesztnél (controls.c autoinput) nem várjuk ki a 80 mp-es videót
+    if (file_exists(DATA_PATH "autoinput")) {
+        log_info("video: autoinput – a bevezető kihagyva");
+        return;
+    }
+#endif
     plm_t *plm = plm_create_with_filename(INTRO_PATH);
     if (!plm || !plm_probe(plm, 5000 * 1024)) {
         log_error("video: %s nem olvasható MPEG-1 (lásd tools/assets/make-intro.sh)", INTRO_PATH);

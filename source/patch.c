@@ -186,6 +186,8 @@ static void Application_InitFromLogo(void *self) {
 // játékbeli menü rajzolása alatt 0, hogy azok a megszokott elrendezéssel jelenjenek meg.
 
 static so_hook load_control_scheme_hook, map_draw_hook, ingame_menu_render_hook;
+// a CFont::DrawString horgonyai (J2ME-szerű bitek; a menücím 17 = vízszintesen középre | fent)
+enum { ANCHOR_HCENTER = 1, ANCHOR_VCENTER = 2, ANCHOR_LEFT = 4, ANCHOR_RIGHT = 8, ANCHOR_TOP = 16, ANCHOR_BOTTOM = 32 };
 static int8_t *dpad_open;
 
 static void LoadControlScheme(int scheme) {
@@ -296,12 +298,115 @@ static void font_hooks(void) {
         controls_note_drawn(self);                                             \
         ORIG(void (*)(void *, int), draw_h_##name)(self, arg);                 \
     }
-DRAW_HOOK(spr)
-DRAW_HOOK(text)
-DRAW_HOOK(anim)
-DRAW_HOOK(tab)
-DRAW_HOOK(dialog)
 DRAW_HOOK(slider)
+
+// Gombjelek a játék saját feliratain (controls.c: controls_button_glyph). A gomb felirata
+// a rajzolás idejére „\x02<képkocka> ” előtagot kap: a játék ezt szövegbe ágyazott ikonként, a gomb saját
+// betűjével és igazításával rajzolja; utána a felirat-mutató visszaáll (a játék objektumában tartósan semmi
+// sem változik). A párbeszéd-dobozra (átvezetőben) a jobb alsó sarkába, a fülsor szélső füleire (L/R)
+// melléjük, kívülre rajzolunk jelet.
+//   CFont::DrawString(text, x, y, anchor, alpha, 0, 0x10000, NULL) – logikai képpontban (480×320)
+//   CFont::GetStringSize(text, &w, &h, NULL)
+//   CSpriteManager::GetFont(név) – a GS_BaseMenu::DrawMenuTitle-ben is így (s_FontBig/Medium/Small)
+// A feliratok helye osztályonként (a Draw-ok DrawString-hívásai szerint): CButtonSpr szöveg +0x88, betű
+// +0x84; CButtonAnim +0x98, +0x9c; CButtonText +0x80, +0x84. Szöveg nélküli gombra (a vissza-nyíl) csak a
+// B kerül, magában.
+#define BTN_RECT    0x08          // short x0, y0, x1, y1 (logikai)
+#define BTN_POS_X   0x34          // short: a gomb helye (a felirat is ehhez igazodik)
+
+static void (*CFont_DrawString)(void *font, const uint16_t *text, int x, int y, int anchor, uint8_t alpha,
+                                int unk, int scale, uint16_t *out);
+static void (*CFont_GetStringSize)(void *font, const uint16_t *text, int *w, int *h, int *out);
+static void *(*SpriteManager_GetFont)(void *mgr, const char *name);
+static void **sprite_manager;
+static const char *font_small;
+static int *logical_width;
+
+static void draw_glyph(uint16_t glyph, int x, int y, int anchor) {
+    void *font = *sprite_manager ? SpriteManager_GetFont(*sprite_manager, font_small) : NULL;
+#ifdef DEBUG
+    static int logged;
+    if (logged++ < 4)
+        log_info("patch: gombjel %d (%d,%d) horgony %d, font %p (%s)", glyph, x, y, anchor, font, font_small);
+#endif
+    if (!font)
+        return;
+    const uint16_t s[3] = { 2, glyph, 0 };
+    CFont_DrawString(font, s, x, y, anchor, 255, 0, 0x10000, NULL);
+}
+
+static void draw_labeled(so_hook *h, void *self, int arg, int text_off, int font_off, bool edge_shift) {
+    controls_note_drawn(self);
+    uint16_t glyph = controls_button_glyph(self);
+    const uint16_t **text = (const uint16_t **)((char *)self + text_off);
+    const uint16_t *orig = *text;
+    bool has_text = orig && orig[0];
+    if (!glyph || (!has_text && glyph != GLYPH_B)) {
+        ORIG(void (*)(void *, int), *h)(self, arg);
+        return;
+    }
+    uint16_t buf[80];
+    int n = 0;
+    buf[n++] = 2;
+    buf[n++] = glyph;
+    const int16_t *r = (const int16_t *)((char *)self + BTN_RECT);
+    bool at_edge = edge_shift && has_text && r[2] > *logical_width;
+    if (has_text) {
+        buf[n++] = ' ';
+        for (int i = 0; orig[i] && n < (int)(sizeof(buf) / sizeof(buf[0])) - 4; i++)
+            buf[n++] = orig[i];
+        if (at_edge)   // a játék a jobb szélre lógó feliratot a képernyő széléhez igazítja: így marad margó
+            for (int i = 0; i < 3; i++)
+                buf[n++] = ' ';
+    }
+    buf[n] = 0;
+    // A képernyő jobb széléig érő gomb (pl. a jobb alsó „Continue”) felirata balra igazított: az előtag
+    // kitolná a képről, ezért a rajzolás idejére az előtag szélességével balra visszük a gombot.
+    int16_t *pos_x = (int16_t *)((char *)self + BTN_POS_X);
+    int16_t old_x = *pos_x;
+    void *font = *(void **)((char *)self + font_off);
+    if (at_edge && font) {
+        const uint16_t prefix[4] = { 2, glyph, ' ', 0 };
+        int w = 0, hgt = 0;
+        CFont_GetStringSize(font, prefix, &w, &hgt, NULL);   // képernyő-képpontban (a font nem skálázódik)
+        int shift = screen_width > 0 ? w * *logical_width / screen_width : 0;
+        if (shift > 0 && shift < 60)
+            *pos_x = (int16_t)(old_x - shift);
+    }
+    *text = buf;
+    ORIG(void (*)(void *, int), *h)(self, arg);
+    *text = orig;
+    *pos_x = old_x;
+}
+
+static so_hook draw_h_spr, draw_h_anim, draw_h_text, draw_h_dialog, draw_h_tab;
+
+// (a jobb szélre lógó feliratot csak a CButtonSpr-nél toljuk: a CButtonAnim-ok – főmenü – becsúsznak a
+// képre, közben a téglalapjuk kilóg, és a felirat ugrálna)
+static void draw_spr(void *self, int arg) { draw_labeled(&draw_h_spr, self, arg, 0x88, 0x84, true); }
+static void draw_anim(void *self, int arg) { draw_labeled(&draw_h_anim, self, arg, 0x98, 0x9c, false); }
+static void draw_text(void *self, int arg) { draw_labeled(&draw_h_text, self, arg, 0x80, 0x84, false); }
+
+static void draw_tab(void *self, int arg) {
+    controls_note_drawn(self);
+    ORIG(void (*)(void *, int), draw_h_tab)(self, arg);
+    uint16_t glyph = controls_button_glyph(self);
+    const int16_t *r = (const int16_t *)((char *)self + BTN_RECT);
+    if (glyph == GLYPH_L)
+        draw_glyph(glyph, r[0] - 2, (r[1] + r[3]) / 2, ANCHOR_RIGHT | ANCHOR_VCENTER);
+    else if (glyph == GLYPH_R)
+        draw_glyph(glyph, r[2] + 2, (r[1] + r[3]) / 2, ANCHOR_LEFT | ANCHOR_VCENTER);
+}
+
+static void draw_dialog(void *self, int arg) {
+    controls_note_drawn(self);
+    ORIG(void (*)(void *, int), draw_h_dialog)(self, arg);
+    uint16_t glyph = controls_button_glyph(self);
+    if (glyph) {
+        const int16_t *r = (const int16_t *)((char *)self + BTN_RECT);
+        draw_glyph(glyph, r[2] - 4, r[3] - 4, ANCHOR_RIGHT | ANCHOR_BOTTOM);
+    }
+}
 
 static void draw_hooks(void) {
     draw_h_spr = hook("_ZN10CButtonSpr4DrawEi", draw_spr);
@@ -380,6 +485,58 @@ static void CZone_SetVisible(void *self, const void *frustum, const void *portal
     ORIG(void (*)(void *, const void *, const void *), zone_visible_hook)(self, frustum, portal);
 }
 
+// ---------------------------------------------------------------------------
+// Betöltési mérés (util.h perf): a GS_Loading élete alatt összegzett idők a naplóba, kiadásban is.
+//   GS_Loading::Create():  push {r4-sl, lr}; sub sp, sp, #16
+//   GS_Loading::Release(): ldr r3, [pc, #148]; push {r4, r5, r6, lr}
+
+static so_hook loading_create_hook, loading_release_hook, set_target_fps_hook;
+static uint64_t loading_t0;
+
+//   Application::SetTargetFPS(int): push {r4, lr}; mov r4, r0
+// A játék a pályatöltés alatt 1000-re emeli a célját (lásd gl.c gl_set_fast_frames), utána 30-ra állítja.
+static void Application_SetTargetFPS(void *self, int fps) {
+    ORIG(void (*)(void *, int), set_target_fps_hook)(self, fps);
+    gl_set_fast_frames(fps > 60);
+}
+
+static void GS_Loading_Create(void *self) {
+    memset(&perf, 0, sizeof(perf));
+    loading_t0 = perf_tick();
+    ORIG(void (*)(void *), loading_create_hook)(self);
+}
+
+//   PVRTCDecompress(data, 2bit, w, h, out):  push {r4-fp, lr}; sub sp, sp, #1440
+// (az argumentumokat 10 szóként változatlanul adjuk tovább, mint a vox-hookoknál; a PVR-textúrák kibontása
+// a pixel_format::convert-ből fut, a betöltés idejének nagy része – Edenben 30 mp a 35-ből)
+typedef uint32_t (*pass10_fn)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
+                              uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
+static so_hook pvrtc_hook;
+
+static uint32_t PVRTCDecompress_timed(uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4,
+                                      uint32_t a5, uint32_t a6, uint32_t a7, uint32_t a8, uint32_t a9) {
+    uint64_t t = perf_tick();
+    uint32_t r = ORIG(pass10_fn, pvrtc_hook)(a0, a1, a2, a3, a4, a5, a6, a7, a8, a9);
+    perf.pvr_ticks += perf_tick() - t;
+    perf.pvrs++;
+    return r;
+}
+
+static void GS_Loading_Release(void *self) {
+    ORIG(void (*)(void *), loading_release_hook)(self);
+    if (!loading_t0)
+        return;
+    uint32_t total = perf_ms(perf_tick() - loading_t0);
+    uint32_t io = perf_ms(perf.io_ticks), sh = perf_ms(perf.shader_ticks), tex = perf_ms(perf.tex_ticks);
+    uint32_t swap = perf_ms(perf.swap_ticks), pvr = perf_ms(perf.pvr_ticks);
+    uint32_t known = io + sh + tex + swap + pvr;
+    log_info("betöltés: %u ms, %u képkocka (csere/vsync %u ms); fájl %u ms (%u megnyitás, %u olvasás, %u MB); "
+             "PVRTC-kibontás %u ms (%u db); shader %u ms (%u db); textúra-feltöltés %u ms (%u db); egyéb %u ms",
+             total, perf.frames, swap, io, perf.opens, perf.reads, (unsigned)(perf.io_bytes >> 20), pvr, perf.pvrs,
+             sh, perf.shaders, tex, perf.textures, total > known ? total - known : 0);
+    loading_t0 = 0;
+}
+
 void patch_text(void) {
     // Itt még csak címeket oldunk fel: a végleges címek (so_symbol) a leképezés után élnek,
     // ezért adatot csak a hookokban és a patch_data()-ban írunk rajtuk át.
@@ -390,6 +547,12 @@ void patch_text(void) {
     s_high_geom = (int8_t *)game_sym("_ZN13CGameSettings24s_hasHighPerformanceGeomE");
     s_view_distance = (float *)game_sym("_ZN13CGameSettings20s_viewDistanceFactorE");
     dpad_open = (int8_t *)game_sym("dpad_open");
+    CFont_DrawString = (void *)game_sym("_ZN5CFont10DrawStringEPKtiiihiiPt");
+    SpriteManager_GetFont = (void *)game_sym("_ZN14CSpriteManager7GetFontEPKc");
+    sprite_manager = (void **)game_sym("_ZN14CSpriteManager9SingletonE");
+    font_small = (const char *)game_sym("s_FontSmall");
+    CFont_GetStringSize = (void *)game_sym("_ZN5CFont13GetStringSizeEPKtPiS2_S2_");
+    logical_width = (int *)game_sym("s_logicalScreenWidth");
 
     hook("_ZN6glitch2os7Printer5printEPKcz", Printer_print);
     hook("_ZN6glitch2os7Printer3logEPKcNS_10ELOG_LEVELE", Printer_log);
@@ -408,6 +571,10 @@ void patch_text(void) {
     map_draw_hook = hook("_ZN11CMapDisplay4DrawEi", CMapDisplay_Draw);
     ingame_menu_render_hook = hook("_ZN13GS_InGameMenu6RenderEv", GS_InGameMenu_Render);
     draw_hooks();
+    loading_create_hook = hook("_ZN10GS_Loading6CreateEv", GS_Loading_Create);
+    loading_release_hook = hook("_ZN10GS_Loading7ReleaseEv", GS_Loading_Release);
+    set_target_fps_hook = hook("_ZN11Application12SetTargetFPSEi", Application_SetTargetFPS);
+    pvrtc_hook = hook("_Z15PVRTCDecompressPKviiiPh", PVRTCDecompress_timed);
     font_hooks();
     zone_visible_hook = hook("_ZN5CZone10SetVisibleEPKN6glitch5scene12SViewFrustumEPK11CZonePortal", CZone_SetVisible);
 

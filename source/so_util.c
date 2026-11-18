@@ -52,6 +52,16 @@ static Handle get_own_process_handle(void) {
     if (g_own_process != INVALID_HANDLE)
         return g_own_process;
 
+    // Valódi Switchen egy alkalmazás egyszerre csak 1 saját session-t tarthat (a PM application-
+    // korlátja: SessionCountMax = 1), és ezt az „sm:” kapcsolat foglalja – amíg nyitva van, az
+    // svcCreateSession 0x10801-et (LimitReached) ad. Az nx-hbloader is lezárja előtte az sm-et;
+    // a kernel a foglalásnál megvárja, míg az sm a saját végét is bezárja. (Az Eden nem korlátoz.)
+    int sm_refs = 0;
+    while (serviceIsActive(smGetServiceSession()) && sm_refs < 16) {
+        smExit();
+        sm_refs++;
+    }
+
     Handle server, client;
     Result rc = svcCreateSession(&server, &client, 0, 0);
     if (R_FAILED(rc))
@@ -69,8 +79,16 @@ static Handle get_own_process_handle(void) {
     threadWaitForExit(&t);
     threadClose(&t);
 
+    for (int i = 0; i < sm_refs; i++) {
+        rc = smInitialize();
+        if (R_FAILED(rc))
+            fatal_error("smInitialize (újra): 0x%x", rc);
+    }
+
     if (g_own_process == INVALID_HANDLE)
         fatal_error("Nem sikerült megszerezni a saját folyamat handle-jét.");
+    log_info("saját folyamat-handle: 0x%x (az sm %d hivatkozása ideiglenesen lezárva)",
+             (unsigned)g_own_process, sm_refs);
     return g_own_process;
 }
 

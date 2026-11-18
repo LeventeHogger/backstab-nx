@@ -18,8 +18,8 @@ nem verziózott `HANDOFF.md` (ha van); visszafejtett részletek: `docs/visszafej
 - Próba Edenben: `tools/dev/run-eden.sh [mp]` (`NOBUILD=1`: fordítás nélkül – debug-buildnél kell, mert a szkript
   kiadásit fordít); szálak pillanatképe: `tools/dev/eden-stacks.py` (leírás a fájl elején). Gépelés nélküli pályapróba
   (debug-build, az SD `switch/backstab/` mappájában; előtte a mentéseket visszamásolni, a `leveltest` checkpointot ír):
-  `autoinput` = „20:SHOT 10:SHOT 10:SHOT 1:A 8:SHOT 1:A 8:SHOT 1:A 8:SHOT 1:DOWN 1:DOWN 1:DOWN 1:DOWN 1:DOWN 1:SHOT 1:A”
-  (cím → Continue → Save 1 → Continue), `leveltest` = „25:130”; `tools/dev/run-eden.sh 420`, a képek: `shots/` → `tools/dev/shot2png.py`.
+  `autoinput` = „20:SHOT 10:SHOT 10:SHOT 1:A 5:A 4:A” (cím → Continue → az A a Save 1-en rögtön indít; a bevezető
+  videó autoinputnál kimarad), `leveltest` = „25:130”; a betöltés bontása a naplóban: `betöltés:` sor; `tools/dev/run-eden.sh 420`, a képek: `shots/` → `tools/dev/shot2png.py`.
 - Telepíthető NSP (NCA-kkal; ezt listázza az Eden főoldala a `dist/`-ből, és ez megy valódi Switchre DBI/Tinfoil):
   `tools/package/pack-nsp.sh` (hacBrewPack + prod.keys; ezt a felhasználó maga indítja: `! tools/package/pack-nsp.sh`).
   A `make` kimenete (`build/backstab.nsp`) csak exefs-csomag: az Eden elindítja, de nem listázza.
@@ -36,7 +36,7 @@ nem verziózott `HANDOFF.md` (ha van); visszafejtett részletek: `docs/visszafej
   `leveltest` („<kezdő index> <mp>” vagy lista „idx:mp idx:mp”: a mentés kézi betöltése után sorban végigtölti a
   pályákat, napló: `[leveltest]` + memória; a mentéseket előtte el kell tenni, mert a betöltés checkpointot ír),
   `shadertest` (1/2/3: a VertexAnim-növényzet piros / köd nélkül / fehér fénnyel), `autoinput` (időzített
-  gombnyomások, pl. a mentés betöltése gépelés nélkül: „40:SHOT 1:A 8:A …”, `controls.c`). A `leveltest` és az
+  gombnyomások, pl. a mentés betöltése gépelés nélkül: „40:SHOT 1:A 8:A …”, `controls.c`; ha van, a bevezető videó kimarad). A `leveltest` és az
   `autoinput` SHOT-ja képkockát ment (`shots/*.rgba` → `tools/dev/shot2png.py`): így a teszthez nem kell a képernyőt
   fotózni, és billentyűt sem kell az Eden-ablakba küldeni. A debug-build a GL-t is figyeli
   (`dynlib.c`): le nem forduló shaderek, minden shader forrása `sdmc:/switch/backstab/shaders/<hash>.glsl`, köd- és
@@ -76,6 +76,10 @@ nem verziózott `HANDOFF.md` (ha van); visszafejtett részletek: `docs/visszafej
   → `ControlScheme`: WalkJoystick, kamera, multi-gombok; `AnalogJoystick::MAX_DISTANCE` logikai pixelben), a kamera a
   játék saját forgatás-eseményét küldi, a menük a natív Xperia Play-fókusznavigációt (`menu_action`, `CButton +0x74`).
   Részletek: `source/controls.c` fejléce. Fix (Vita-ból skálázott) érintéspontokra csak tartalékként támaszkodunk.
+- **Gombjelek a játék feliratain:** a `patch.c` a `CButtonSpr::Draw` idejére a felirat (+0x88) elé teszi a
+  `\x02<képkocka>` ikont (`port.h` `GLYPH_*`: a glyphs.c Switch-jelei), és utána visszaállítja – a játék
+  objektumába tartósan nem írunk (a felszabadított gombokba írás memóriát rontana). Melyik gombra mi kerül: `controls.c`
+  `labels_update`. Átvezetőben (a `CLevel`+0x1af8 Skip él) A = Skip, B = a párbeszéd következő sora.
 - **Az 1080p-s adatcsomag `eu_font_*` fontjai nem eredetiek** (utólag gyártottak: hiányzó à é ß, a
   „small” nagyobb a „medium”-nál). Az eredeti a Gameloft 1280×800-as csomagjában van; a játék a fontot nem skálázza
   (NoScale modulméret, a sorköz is abból), ezért 1080/800-szoros modulokkal pontosan az eredeti arány jön ki.
@@ -90,7 +94,9 @@ nem verziózott `HANDOFF.md` (ha van); visszafejtett részletek: `docs/visszafej
   Hookolni csak olyan ARM-függvényt, aminek az első két utasítása áthelyezhető (nincs ág, csak `ldr rX,[pc,#imm]` PC-relatív).
 - Az Eden (yuzu-alapú) a nyers `exefs/main`-t 64 bitesnek veszi: mindig az NSP-t kell betölteni. Multi-core módban a
   dynarmic A32 JIT összeomlik → egymagos mód. A Ryujinx 32 bites JIT-je hosszú ciklusoknál elszáll, arra nem jó.
-- 32 bites folyamat Homebrew menüből (.nro) nem indul: NSP-ként fut (valódi Switchen még nincs kipróbálva).
+- 32 bites folyamat Homebrew menüből (.nro) nem indul: NSP-ként fut. Valódi Switchen az alkalmazás erőforráskorlátja szűk
+  (1 saját session, 96 szál, 32 transfer memory), az Eden nem korlátoz: ami ott megy, a gépen 0x10801-gyel (LimitReached)
+  elszállhat – ezért zárja le a `so_util.c` a saját folyamat-handle megszerzésének idejére az `sm:`-et (mint az nx-hbloader).
 - Címazonosító: `0100BAC57AB00000` (`backstab.json`, `Makefile` NACPFLAGS – **0x nélkül**, mert a nacptool csak 16
   karaktert olvas –, `tools/package/pack-nsp.sh`; együtt változnak). A telepíthető NSP NACP-jét a `tools/package/nacp-fix.py` egészíti ki:
   16 nyelv címmel és ikonnal (a HOME menü a rendszernyelv szerintit keresi), nincs felhasználóválasztás és
