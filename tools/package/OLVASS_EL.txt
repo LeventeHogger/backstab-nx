@@ -4,8 +4,9 @@ BACKSTAB HD – NINTENDO SWITCH (kísérleti port)
 Ez a csomag a Backstab HD Android-kiadását futtatja Switchen. Emulátorban (Eden)
 tesztelve; valódi Switchen ez az első kipróbálás – ha valami nem megy, lásd a végén.
 
-Rövid változat (Macen, kártyaolvasóval):
-  1. Dugd be a Switch SD-kártyáját, és kattints duplán az „SD-re-masolas.command”-ra.
+Rövid változat:
+  1. Az SD-kártyára: a BackstabHD.nsp a gyökérbe, a „backstab” mappa a kártya meglévő
+     „switch” mappájába (lásd 1. lépés).
   2. A Switchen: DBI → „Browse SD Card” → BackstabHD.nsp → Install.
   3. Indítsd a „Backstab HD”-t a főképernyőről.
 
@@ -20,12 +21,7 @@ MI KELL HOZZÁ
 
 1. LÉPÉS – FÁJLOK AZ SD-KÁRTYÁRA
 --------------------------------
-Macen: dugd be a kártyát, és kattints duplán az „SD-re-masolas.command”-ra. Megkeresi a
-Switch-kártyát, rákérdez, felmásol mindent (a kártyán lévő többi fájlhoz nem nyúl), és a
-végén kiadja a kártyát. Ha a macOS nem engedi megnyitni (letöltött zipből): Rendszer-
-beállítások → Adatvédelem és biztonság → lent „Megnyitás mindenképp”.
-
-Kézzel (Windows, vagy ha a szkript nem megy): az „SD-kartyara” mappában két dolog van.
+Az „SD-kartyara” mappában két dolog van (kártyaolvasóval a leggyorsabb):
   - A „BackstabHD.nsp”-t másold az SD-kártya gyökerébe.
   - A „switch” mappán belüli „backstab” mappát húzd bele az SD-kártyán MÁR MEGLÉVŐ
     „switch” mappába. A „switch” mappát NE másold rá egészében: Macen a Finder ilyenkor

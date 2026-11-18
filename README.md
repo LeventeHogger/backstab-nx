@@ -80,9 +80,8 @@ az SD-kártyán. A 32 bites folyamat a Homebrew menüből (.nro) nem indul, ezé
 A mentések a játék adatmappájában vannak (`save*.dat`, `globalsave*.dat`, `settings.dat`): újratelepítéskor
 megmaradnak, és fájlként menthetők; indításkor nincs felhasználóválasztás.
 
-Kész csomag a saját fájljaidból (SD-mappa + NSP + lépésenkénti útmutató + macOS-es egykattintásos SD-másoló):
-`tools/package/make-package.sh` → `dist/BackstabHD-Switch/`. Az útmutató:
-[`tools/package/files/OLVASS_EL.txt`](tools/package/files/OLVASS_EL.txt).
+Kész csomag a saját fájljaidból (SD-mappa + NSP + lépésenkénti útmutató): `tools/package/make-package.sh` →
+`dist/BackstabHD-Switch/`. Az útmutató: [`tools/package/OLVASS_EL.txt`](tools/package/OLVASS_EL.txt).
 
 ## Irányítás
 
@@ -152,7 +151,7 @@ backstab-nx/
 ├── tools/
 │   ├── assets/      eszközgyártók: betűkészlet, gombjelek, ikon, bevezető videó, .gla-archívumok
 │   ├── dev/         fejlesztés: Eden-indító, tesztbevitel, szálpillanatkép, képkocka-átalakító, importlefedettség
-│   └── package/     telepíthető NSP és kész csomag (files/: útmutató és SD-másoló)
+│   └── package/     telepíthető NSP és kész csomag (az útmutatóval)
 ├── backstab.json    NPDM: 32 bites folyamat, címazonosító, jogosultságok
 └── Makefile         minden kimenet a build/-be; a telepíthető NSP és a csomag a dist/-be
 ```

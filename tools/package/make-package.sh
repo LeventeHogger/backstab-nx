@@ -2,8 +2,7 @@
 # Kipróbálható Switch-csomag a saját játékfájlokból → dist/BackstabHD-Switch/ és dist/BackstabHD-Switch.zip
 #   SD-kartyara/switch/backstab/     – libPirates.so + a játék adatmappája (files/, benne intro.mpg)
 #   SD-kartyara/BackstabHD.nsp       – DBI-jal telepítendő (tools/package/pack-nsp.sh kimenete)
-#   SD-re-masolas.command            – macOS: dupla kattintásra az SD-kártyára másol (összefésül, mentést nem töröl)
-#   OLVASS_EL.txt                    – útmutató (tools/package/)
+#   OLVASS_EL.txt                    – útmutató (tools/package/OLVASS_EL.txt)
 # Előtte: kiadási make (nem debug) és tools/package/pack-nsp.sh. A nagy fájlok APFS-klónként kerülnek a mappába (nem
 # foglalnak plusz helyet; a zip igen). A csomag a saját példányból készül – a repóba és nyilvános helyre soha.
 #
@@ -66,9 +65,7 @@ else
   echo "figyelem: nincs intro.mp4 vagy ffmpeg – a bevezető videó kimarad" >&2
 fi
 clone "$NSP" "$OUT/SD-kartyara/BackstabHD.nsp"
-cp tools/package/files/OLVASS_EL.txt "$OUT/OLVASS_EL.txt"
-cp tools/package/files/SD-re-masolas.command "$OUT/SD-re-masolas.command"
-chmod +x "$OUT/SD-re-masolas.command"
+cp tools/package/OLVASS_EL.txt "$OUT/OLVASS_EL.txt"
 # a macOS rejtett fájljai (.DS_Store, ._*) és kiterjesztett attribútumai ne kerüljenek az SD-re / a zipbe
 find "$OUT" \( -name .DS_Store -o -name '._*' \) -delete
 xattr -rc "$OUT" 2>/dev/null || true

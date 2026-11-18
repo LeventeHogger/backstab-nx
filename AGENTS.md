@@ -28,8 +28,7 @@ nem verziózott `HANDOFF.md` (ha van); visszafejtett részletek: `docs/visszafej
   Gameloft-csomag (`FONT_PACK`, alap: `…/gameloft-data/sprites_1280x800.gla`) és a Pillow-s Python (`FONT_PY`); nélküle
   figyelmeztet, és az adatcsomag fontja marad. Az SD-re nem kell semmi.
 - Kipróbálható csomag Switchre: kiadási `make` + `tools/package/pack-nsp.sh`, majd `tools/package/make-package.sh` → `dist/BackstabHD-Switch/`
-  (SD-mappa, NSP, magyar útmutató: `tools/package/files/OLVASS_EL.txt`, macOS-es SD-másoló: `tools/package/files/SD-re-masolas.command`;
-  a játékfájlok APFS-klónként, a saját példányból; a bevezető videót `tools/assets/make-intro.sh` gyártja ffmpeg-gel:
+  (SD-mappa, NSP, magyar útmutató: `tools/package/OLVASS_EL.txt`; a játékfájlok APFS-klónként, a saját példányból; a bevezető videót `tools/assets/make-intro.sh` gyártja ffmpeg-gel:
   `files/intro.mpg`). Források: `SO`, `DATA`, `STRINGS`, `EFFECTS` környezeti változók (a szkript fejlécében).
 - Debug-kapcsolók az SD-n (`sdmc:/switch/backstab/`): `tiptest` (benne egy MAIN-szövegsorszám, pl. 1536 = koponyás
   tipp: mindig ez a töltőképernyő-tipp), `ref800` (1280×800-as képernyő → a játék az eredeti `sprites_1280x800.gla`-t
