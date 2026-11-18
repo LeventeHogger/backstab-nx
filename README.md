@@ -104,7 +104,8 @@ Kész csomag a saját fájljaidból (SD-mappa + NSP + lépésenkénti útmutató
 | R3 | szabad kurzor be/ki | szabad kurzor be/ki (ahol nincs kijelölhető gomb, magától jön) |
 
 A menükben és az átvezetőkben a gombok felirata mellett a játék saját stílusában látszik a kontrollergomb
-(B a vissza-gombon, A az indításon és a Skipen, L/R a szünetmenü fülsorának két végén).
+(B a vissza-gombon és a párbeszéd-dobozon, A a kijelölt gombon, az indításon és a Skipen, L/R a szünetmenü
+fülsorának két szélső füle alatt).
 
 ## Beállítások
 
@@ -279,7 +280,8 @@ A ready-made package from your own files (SD folder + NSP + step-by-step guide i
 | R3 | free cursor on/off | free cursor on/off (appears automatically where there is no selectable button) |
 
 In menus and cutscenes the controller button is shown next to the button labels, in the game's own style
-(B on the back button, A on start and Skip, L/R at both ends of the pause menu's tab bar).
+(B on the back button and the dialogue box, A on the selected button, start and Skip, L/R under the outermost
+tabs of the pause menu).
 
 ### Settings
 

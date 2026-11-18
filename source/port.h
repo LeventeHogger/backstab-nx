@@ -39,6 +39,14 @@ bool audio_pcm_write(const int16_t *frames, uint32_t nframes, int rate);
 void audio_pcm_end(void);
 // gl.c – pályatöltés alatt (a játék célja > 60 fps) nincs vsync-várakozás; a patch.c SetTargetFPS-hookja hívja
 void gl_set_fast_frames(bool fast);
+// pvrtc.c – a játék PVRTCDecompress-ével bájtra azonos, gyors kibontás RGBA8888-ra (több szálon); hamis, ha ezt a
+// méretet nem kezeli (nem 2-hatvány vagy 2×2 blokknál kisebb) – ilyenkor az eredeti kell
+typedef void (*pvrtc_fn)(const void *src, int two_bit, int xdim, int ydim, uint8_t *out);
+bool pvrtc_decompress(const void *src, int two_bit, int xdim, int ydim, uint8_t *out);
+#ifdef DEBUG
+// csak debug: véletlen blokkokon, sok méretben összeveti az eredetivel (orig); igaz, ha mind azonos
+bool pvrtc_selftest(pvrtc_fn orig);
+#endif
 // video.c – a bevezető videó (files/intro.mpg, ha van) az első töltés előtt; gl_init és controls_init után
 void video_play_intro(void);
 #ifdef DEBUG

@@ -16,10 +16,11 @@ nem verziózott `HANDOFF.md` (ha van); visszafejtett részletek: `docs/visszafej
   (a `build/.defines` alapján váltáskor magától újrafordít; a debug-build naplózza a fájlmegnyitásokat, a HUD-ot, a
   menüket, a ködöt/látótávot – `source/debug_hooks.c`).
 - Próba Edenben: `tools/dev/run-eden.sh [mp]` (`NOBUILD=1`: fordítás nélkül – debug-buildnél kell, mert a szkript
-  kiadásit fordít); szálak pillanatképe: `tools/dev/eden-stacks.py` (leírás a fájl elején). Gépelés nélküli pályapróba
+  kiadásit fordít; az Eden a vendég fájlírásait pufferben tartja, a szkript végi `kill -9` a napló utolsó sorait
+  elnyelheti – kiadási buildben, ahol utána nincs több napló, a `menütöltés:` sort is: ez nem elakadás); szálak pillanatképe: `tools/dev/eden-stacks.py` (leírás a fájl elején). Gépelés nélküli pályapróba
   (debug-build, az SD `switch/backstab/` mappájában; előtte a mentéseket visszamásolni, a `leveltest` checkpointot ír):
   `autoinput` = „20:SHOT 10:SHOT 10:SHOT 1:A 5:A 4:A” (cím → Continue → az A a Save 1-en rögtön indít; a bevezető
-  videó autoinputnál kimarad), `leveltest` = „25:130”; a betöltés bontása a naplóban: `betöltés:` sor; `tools/dev/run-eden.sh 420`, a képek: `shots/` → `tools/dev/shot2png.py`.
+  videó autoinputnál kimarad), `leveltest` = „25:130”; a töltések bontása a naplóban: `menütöltés:` és `betöltés:` sor (debugban a PVRTC-ellenőrzés lassít, `nopvrtccheck` kikapcsolja); `tools/dev/run-eden.sh 420`, a képek: `shots/` → `tools/dev/shot2png.py`.
 - Telepíthető NSP (NCA-kkal; ezt listázza az Eden főoldala a `dist/`-ből, és ez megy valódi Switchre DBI/Tinfoil):
   `tools/package/pack-nsp.sh` (hacBrewPack + prod.keys; ezt a felhasználó maga indítja: `! tools/package/pack-nsp.sh`).
   A `make` kimenete (`build/backstab.nsp`) csak exefs-csomag: az Eden elindítja, de nem listázza.
@@ -30,7 +31,7 @@ nem verziózott `HANDOFF.md` (ha van); visszafejtett részletek: `docs/visszafej
 - Kipróbálható csomag Switchre: kiadási `make` + `tools/package/pack-nsp.sh`, majd `tools/package/make-package.sh` → `dist/BackstabHD-Switch/`
   (SD-mappa, NSP, magyar útmutató: `tools/package/OLVASS_EL.txt`; a játékfájlok APFS-klónként, a saját példányból; a bevezető videót `tools/assets/make-intro.sh` gyártja ffmpeg-gel:
   `files/intro.mpg`). Források: `SO`, `DATA`, `STRINGS`, `EFFECTS` környezeti változók (a szkript fejlécében).
-- Debug-kapcsolók az SD-n (`sdmc:/switch/backstab/`): `tiptest` (benne egy MAIN-szövegsorszám, pl. 1536 = koponyás
+- Debug-kapcsolók az SD-n (`sdmc:/switch/backstab/`): `nopvrtccheck` (a gyors PVRTC-kibontást nem veti össze az eredetivel – a valódi töltési időhöz; alapból minden textúrát összevet, eltérésnél az eredeti marad, és a `pvrtc-önteszt` induláskor fut), `tiptest` (benne egy MAIN-szövegsorszám, pl. 1536 = koponyás
   tipp: mindig ez a töltőképernyő-tipp), `ref800` (1280×800-as képernyő → a játék az eredeti `sprites_1280x800.gla`-t
   tölti, DXT-vel; ehhez a csomagot a `files/`-ba kell klónozni – referencia-képhez az eredeti kinézetről, a 3D bíbor),
   `leveltest` („<kezdő index> <mp>” vagy lista „idx:mp idx:mp”: a mentés kézi betöltése után sorban végigtölti a
@@ -79,7 +80,9 @@ nem verziózott `HANDOFF.md` (ha van); visszafejtett részletek: `docs/visszafej
 - **Gombjelek a játék feliratain:** a `patch.c` a `CButtonSpr::Draw` idejére a felirat (+0x88) elé teszi a
   `\x02<képkocka>` ikont (`port.h` `GLYPH_*`: a glyphs.c Switch-jelei), és utána visszaállítja – a játék
   objektumába tartósan nem írunk (a felszabadított gombokba írás memóriát rontana). Melyik gombra mi kerül: `controls.c`
-  `labels_update`. Átvezetőben (a `CLevel`+0x1af8 Skip él) A = Skip, B = a párbeszéd következő sora.
+  `labels_update`. Átvezetőben (a `CLevel`+0x1af8 Skip él) A = Skip, B = a párbeszéd következő sora. A jobbra
+  igazított szövegbe ágyazott ikont a `CFont::DrawString` rosszul igazítja (lelóg): a jobb szélre lógó feliratnál
+  a szöveg marad, az ikont a `DrawString`-hook külön rajzolja elé; a horgonybitek: `docs/visszafejtes.md`.
 - **Az 1080p-s adatcsomag `eu_font_*` fontjai nem eredetiek** (utólag gyártottak: hiányzó à é ß, a
   „small” nagyobb a „medium”-nál). Az eredeti a Gameloft 1280×800-as csomagjában van; a játék a fontot nem skálázza
   (NoScale modulméret, a sorköz is abból), ezért 1080/800-szoros modulokkal pontosan az eredeti arány jön ki.

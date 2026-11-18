@@ -187,7 +187,9 @@ static void Application_InitFromLogo(void *self) {
 
 static so_hook load_control_scheme_hook, map_draw_hook, ingame_menu_render_hook;
 // a CFont::DrawString horgonyai (J2ME-szerű bitek; a menücím 17 = vízszintesen középre | fent)
-enum { ANCHOR_HCENTER = 1, ANCHOR_VCENTER = 2, ANCHOR_LEFT = 4, ANCHOR_RIGHT = 8, ANCHOR_TOP = 16, ANCHOR_BOTTOM = 32 };
+// CFont::DrawString horgonybitjei (a függvény ezeket vizsgálja): vízszintesen 1 közép, 2 jobb (alap: bal),
+// függőlegesen 16 közép, 32 alul (alap: felül)
+enum { ANCHOR_LEFT = 0, ANCHOR_TOP = 0, ANCHOR_HCENTER = 1, ANCHOR_RIGHT = 2, ANCHOR_VCENTER = 16, ANCHOR_BOTTOM = 32 };
 static int8_t *dpad_open;
 
 static void LoadControlScheme(int scheme) {
@@ -303,8 +305,8 @@ DRAW_HOOK(slider)
 // Gombjelek a játék saját feliratain (controls.c: controls_button_glyph). A gomb felirata
 // a rajzolás idejére „\x02<képkocka> ” előtagot kap: a játék ezt szövegbe ágyazott ikonként, a gomb saját
 // betűjével és igazításával rajzolja; utána a felirat-mutató visszaáll (a játék objektumában tartósan semmi
-// sem változik). A párbeszéd-dobozra (átvezetőben) a jobb alsó sarkába, a fülsor szélső füleire (L/R)
-// melléjük, kívülre rajzolunk jelet.
+// sem változik). A párbeszéd-dobozra (átvezetőben) a jobb szélére, a fülsor szélső füleire (L/R) alájuk
+// rajzolunk jelet.
 //   CFont::DrawString(text, x, y, anchor, alpha, 0, 0x10000, NULL) – logikai képpontban (480×320)
 //   CFont::GetStringSize(text, &w, &h, NULL)
 //   CSpriteManager::GetFont(név) – a GS_BaseMenu::DrawMenuTitle-ben is így (s_FontBig/Medium/Small)
@@ -312,7 +314,7 @@ DRAW_HOOK(slider)
 // +0x84; CButtonAnim +0x98, +0x9c; CButtonText +0x80, +0x84. Szöveg nélküli gombra (a vissza-nyíl) csak a
 // B kerül, magában.
 #define BTN_RECT    0x08          // short x0, y0, x1, y1 (logikai)
-#define BTN_POS_X   0x34          // short: a gomb helye (a felirat is ehhez igazodik)
+#define DIALOG_GLYPH_MARGIN 12   // a párbeszéd B-je a doboz jobb szélétől (logikai)
 
 static void (*CFont_DrawString)(void *font, const uint16_t *text, int x, int y, int anchor, uint8_t alpha,
                                 int unk, int scale, uint16_t *out);
@@ -335,7 +337,12 @@ static void draw_glyph(uint16_t glyph, int x, int y, int anchor) {
     CFont_DrawString(font, s, x, y, anchor, 255, 0, 0x10000, NULL);
 }
 
-static void draw_labeled(so_hook *h, void *self, int arg, int text_off, int font_off, bool edge_shift) {
+// A képernyő jobb széléig érő CButtonSpr (a mentésválasztó „Continue”-ja, az átvezető Skip-sávja) előtagos
+// felirata a CFont::DrawString-hookban kerül a helyére (lásd lent): a gomb és a háttere nem mozdul. A draw_labeled
+// rajzolása alatt érvényes.
+static const uint16_t *edge_text, *edge_orig;
+
+static void draw_labeled(so_hook *h, void *self, int arg, int text_off, bool edge_shift) {
     controls_note_drawn(self);
     uint16_t glyph = controls_button_glyph(self);
     const uint16_t **text = (const uint16_t **)((char *)self + text_off);
@@ -349,62 +356,104 @@ static void draw_labeled(so_hook *h, void *self, int arg, int text_off, int font
     int n = 0;
     buf[n++] = 2;
     buf[n++] = glyph;
-    const int16_t *r = (const int16_t *)((char *)self + BTN_RECT);
-    bool at_edge = edge_shift && has_text && r[2] > *logical_width;
     if (has_text) {
         buf[n++] = ' ';
-        for (int i = 0; orig[i] && n < (int)(sizeof(buf) / sizeof(buf[0])) - 4; i++)
+        for (int i = 0; orig[i] && n < (int)(sizeof(buf) / sizeof(buf[0])) - 1; i++)
             buf[n++] = orig[i];
-        if (at_edge)   // a játék a jobb szélre lógó feliratot a képernyő széléhez igazítja: így marad margó
-            for (int i = 0; i < 3; i++)
-                buf[n++] = ' ';
     }
     buf[n] = 0;
-    // A képernyő jobb széléig érő gomb (pl. a jobb alsó „Continue”) felirata balra igazított: az előtag
-    // kitolná a képről, ezért a rajzolás idejére az előtag szélességével balra visszük a gombot.
-    int16_t *pos_x = (int16_t *)((char *)self + BTN_POS_X);
-    int16_t old_x = *pos_x;
-    void *font = *(void **)((char *)self + font_off);
-    if (at_edge && font) {
-        const uint16_t prefix[4] = { 2, glyph, ' ', 0 };
-        int w = 0, hgt = 0;
-        CFont_GetStringSize(font, prefix, &w, &hgt, NULL);   // képernyő-képpontban (a font nem skálázódik)
-        int shift = screen_width > 0 ? w * *logical_width / screen_width : 0;
-        if (shift > 0 && shift < 60)
-            *pos_x = (int16_t)(old_x - shift);
+    const int16_t *r = (const int16_t *)((char *)self + BTN_RECT);
+    if (edge_shift && has_text && r[2] > *logical_width) {
+        edge_text = buf;
+        edge_orig = orig;
     }
     *text = buf;
     ORIG(void (*)(void *, int), *h)(self, arg);
     *text = orig;
-    *pos_x = old_x;
+    edge_text = edge_orig = NULL;
+}
+
+//   CFont::DrawString: push {r4-fp, lr}; vpush {d8}
+// Az előtagos szél-felirat (edge_text) a képen maradjon, legalább 10 egységre a széltől, ahogy a játék a saját
+// Skip-/Continue-feliratát igazítja (CButtonSpr::Draw: x = szélesség − 10, jobbra igazítva). A jobbra igazított
+// szövegbe ágyazott ikonnal a DrawString elszámolja magát (a felirat az ikon szélességével jobbra csúszik, és
+// lelóg), ezért ott a szöveg változatlanul, a játék helyén marad, az ikon pedig külön kerül elé.
+#define EDGE_MARGIN 10
+static so_hook drawstring_hook;
+typedef void (*drawstring_fn)(void *, const uint16_t *, int, int, int, uint8_t, int, int, uint16_t *);
+
+static int text_width_px(void *font, const uint16_t *text) {
+    int w = 0, h = 0, w2 = 0;
+    CFont_GetStringSize(font, text, &w, &h, &w2);   // képernyő-képpontban
+    return w;
+}
+
+static void CFont_DrawString_hook(void *font, const uint16_t *text, int x, int y, int anchor, uint8_t alpha, int unk,
+                                  int scale, uint16_t *out) {
+    const drawstring_fn orig = ORIG(drawstring_fn, drawstring_hook);
+    if (text && text == edge_text && font && screen_width > 0 && *logical_width > 0) {
+        const int sw = screen_width, lw = *logical_width;
+        if (anchor & ANCHOR_RIGHT) {
+            orig(font, edge_orig, x, y, anchor, alpha, unk, scale, out);
+            const uint16_t space[2] = { ' ', 0 }, icon[3] = { 2, text[1], 0 };
+            // (az ikon a mértnél kb. egy szóközzel szélesebben rajzolódik: két szóköz a rés)
+            const int left_px = x * sw / lw - text_width_px(font, edge_orig) - 2 * text_width_px(font, space);
+            orig(font, icon, (left_px * lw + sw / 2) / sw, y, anchor, alpha, unk, scale, out);
+            return;
+        }
+        // balra/középre igazítva az ikon a szöveg elején jó helyen van; ha lelógna, balra visszük
+        const int px = x * sw / lw, w = text_width_px(font, text), w0 = text_width_px(font, edge_orig);
+        const int r0 = anchor & ANCHOR_HCENTER ? px + w0 / 2 : px + w0;
+        const int r1 = anchor & ANCHOR_HCENTER ? px + w / 2 : px + w;
+        const int edge = sw - EDGE_MARGIN * sw / lw, limit = r0 > edge ? r0 : edge;
+        if (r1 > limit)
+            x -= ((r1 - limit) * lw + sw - 1) / sw;
+    }
+    orig(font, text, x, y, anchor, alpha, unk, scale, out);
 }
 
 static so_hook draw_h_spr, draw_h_anim, draw_h_text, draw_h_dialog, draw_h_tab;
 
-// (a jobb szélre lógó feliratot csak a CButtonSpr-nél toljuk: a CButtonAnim-ok – főmenü – becsúsznak a
-// képre, közben a téglalapjuk kilóg, és a felirat ugrálna)
-static void draw_spr(void *self, int arg) { draw_labeled(&draw_h_spr, self, arg, 0x88, 0x84, true); }
-static void draw_anim(void *self, int arg) { draw_labeled(&draw_h_anim, self, arg, 0x98, 0x9c, false); }
-static void draw_text(void *self, int arg) { draw_labeled(&draw_h_text, self, arg, 0x80, 0x84, false); }
+// (a jobb szélre lógó feliratot csak a CButtonSpr-nél igazítjuk: a CButtonAnim-ok – főmenü – becsúsznak a
+// képre, közben a téglalapjuk kilóg, és a felirat a gomb előtt érkezne)
+// A jobb szélre lógó CButtonSpr-ek alsó sávja (Skip, mentésválasztó Continue) 1920 szélesen 3 képponttal a szél
+// előtt ér véget (a játék saját elrendezése): a rajzolás idejére egy egységgel jobbra visszük a gomb helyét (a sáv
+// kép 4 képponttal jobbra kerül, a felirat a gomb téglalapjához igazodik, az nem mozdul).
+#define BTN_POS_X 0x34   // short: a gomb sprite-jának helye (logikai)
+static void draw_spr(void *self, int arg) {
+    const int16_t *r = (const int16_t *)((char *)self + BTN_RECT);
+    int16_t *pos_x = (int16_t *)((char *)self + BTN_POS_X);
+    const int16_t old_x = *pos_x;
+    if (r[2] > *logical_width)
+        *pos_x = (int16_t)(old_x + 1);
+    draw_labeled(&draw_h_spr, self, arg, 0x88, true);
+    *pos_x = old_x;
+}
+static void draw_anim(void *self, int arg) { draw_labeled(&draw_h_anim, self, arg, 0x98, false); }
+static void draw_text(void *self, int arg) { draw_labeled(&draw_h_text, self, arg, 0x80, false); }
 
+#define SHOULDER_GLYPH_HALF_W 23   // logikai egység (mérve, lásd lent)
 static void draw_tab(void *self, int arg) {
     controls_note_drawn(self);
     ORIG(void (*)(void *, int), draw_h_tab)(self, arg);
     uint16_t glyph = controls_button_glyph(self);
     const int16_t *r = (const int16_t *)((char *)self + BTN_RECT);
-    if (glyph == GLYPH_L)
-        draw_glyph(glyph, r[0] - 2, (r[1] + r[3]) / 2, ANCHOR_RIGHT | ANCHOR_VCENTER);
-    else if (glyph == GLYPH_R)
-        draw_glyph(glyph, r[2] + 2, (r[1] + r[3]) / 2, ANCHOR_LEFT | ANCHOR_VCENTER);
+    // A szélső fül alá, középre (az utolsó fül és a képernyő széle közé nem fér be). A két modulból álló
+    // vállgomb-jelet a GetStringSize a rajzoltnál keskenyebbnek méri, így a középre igazítás jobbra csúszna:
+    // balra igazítjuk – a rajzolt jel közepe 1920 szélesen a megadott x után 93 képpontra (≈ 23 egység) esik.
+    if (glyph == GLYPH_L || glyph == GLYPH_R)
+        draw_glyph(glyph, (r[0] + r[2]) / 2 - SHOULDER_GLYPH_HALF_W, r[3] + 1, ANCHOR_LEFT | ANCHOR_TOP);
 }
 
+// A párbeszéd-doboz B-je a doboz jobb szélén, függőlegesen középen (a szöveg sorában): a jobb alsó sarokban a
+// Skip-sáv A-ja mellé került volna, és a kettő összefolyt.
 static void draw_dialog(void *self, int arg) {
     controls_note_drawn(self);
     ORIG(void (*)(void *, int), draw_h_dialog)(self, arg);
     uint16_t glyph = controls_button_glyph(self);
     if (glyph) {
         const int16_t *r = (const int16_t *)((char *)self + BTN_RECT);
-        draw_glyph(glyph, r[2] - 4, r[3] - 4, ANCHOR_RIGHT | ANCHOR_BOTTOM);
+        draw_glyph(glyph, r[2] - DIALOG_GLYPH_MARGIN, (r[1] + r[3]) / 2, ANCHOR_RIGHT | ANCHOR_VCENTER);
     }
 }
 
@@ -415,6 +464,7 @@ static void draw_hooks(void) {
     draw_h_tab = hook("_ZN4CTab4DrawEi", draw_tab);
     draw_h_dialog = hook("_ZN14CDialogTextBox4DrawEi", draw_dialog);
     draw_h_slider = hook("_ZN7CSlider4DrawEi", draw_slider);
+    drawstring_hook = hook("_ZN5CFont10DrawStringEPKtiiihiiPt", CFont_DrawString_hook);
 }
 
 // ---------------------------------------------------------------------------
@@ -500,41 +550,144 @@ static void Application_SetTargetFPS(void *self, int fps) {
     gl_set_fast_frames(fps > 60);
 }
 
-static void GS_Loading_Create(void *self) {
+#ifdef DEBUG
+static struct {
+    uint32_t same, diff, skipped;
+    uint64_t orig_ticks;
+} pvr_check;   // debug: a PVRTC-ellenőrzés a betöltés alatt
+#endif
+
+static void perf_begin(void) {
     memset(&perf, 0, sizeof(perf));
+#ifdef DEBUG
+    memset(&pvr_check, 0, sizeof(pvr_check));
+#endif
     loading_t0 = perf_tick();
+}
+
+static void GS_Loading_Create(void *self) {
+    perf_begin();
     ORIG(void (*)(void *), loading_create_hook)(self);
 }
 
-//   PVRTCDecompress(data, 2bit, w, h, out):  push {r4-fp, lr}; sub sp, sp, #1440
-// (az argumentumokat 10 szóként változatlanul adjuk tovább, mint a vox-hookoknál; a PVR-textúrák kibontása
-// a pixel_format::convert-ből fut, a betöltés idejének nagy része – Edenben 30 mp a 35-ből)
-typedef uint32_t (*pass10_fn)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
-                              uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
-static so_hook pvrtc_hook;
+//   GS_LoadMenu::Create(): push {r4-r7, lr}; sub sp, sp, #20
+//   GS_LoadMenu::Release(): ldr r3, [pc, #116]; push {r4, r5, r6, lr}
+// Az indulás töltése (a GS_Intro után, a címkép előtt): sprite-ok, a menü háttérpályája, a felület, a hangok.
+// Az eredeti a menütöltés alatt nem emeli a célját (a GS_Loading igen: SetTargetFPS(1000)), így ~150 kis
+// lépésének mindegyike kivárná a 30 fps-es képkockát (Switchen ~5 mp) – ugyanúgy emeljük, utána visszaáll.
+#define APP_TARGET_FPS 0x50   // Application: int cél-fps (SetTargetFPS írja, +0x54 az ezredmásodperce)
+static so_hook loadmenu_create_hook, loadmenu_release_hook;
+static void *(*Application_GetInstance)(void);
+static int loadmenu_prev_fps;
 
-static uint32_t PVRTCDecompress_timed(uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4,
-                                      uint32_t a5, uint32_t a6, uint32_t a7, uint32_t a8, uint32_t a9) {
-    uint64_t t = perf_tick();
-    uint32_t r = ORIG(pass10_fn, pvrtc_hook)(a0, a1, a2, a3, a4, a5, a6, a7, a8, a9);
-    perf.pvr_ticks += perf_tick() - t;
-    perf.pvrs++;
-    return r;
+static void GS_LoadMenu_Create(void *self) {
+    perf_begin();
+    ORIG(void (*)(void *), loadmenu_create_hook)(self);
+    char *app = Application_GetInstance ? Application_GetInstance() : NULL;
+    if (app) {
+        loadmenu_prev_fps = *(int *)(app + APP_TARGET_FPS);
+        Application_SetTargetFPS(app, 1000);
+    }
 }
 
-static void GS_Loading_Release(void *self) {
-    ORIG(void (*)(void *), loading_release_hook)(self);
+#ifdef DEBUG
+// csak debug: a lassú lépések (a lépésszámláló +0x18) a naplóba
+static so_hook loadmenu_update_hook;
+static void GS_LoadMenu_Update(void *self) {
+    const int step = *(int *)((char *)self + 0x18);
+    const uint64_t t = perf_tick();
+    ORIG(void (*)(void *), loadmenu_update_hook)(self);
+    const uint32_t ms = perf_ms(perf_tick() - t);
+    if (ms >= 100)
+        log_info("menütöltés: %d. lépés %u ms", step, ms);
+}
+#endif
+
+//   PVRTCDecompress(data, 2bit, w, h, out):  push {r4-fp, lr}; sub sp, sp, #1440
+// A PVR-textúrák kibontása (a pixel_format::convert-ből) a betöltés idejének nagy része – Edenben 30 mp a 35-ből.
+// Helyette a pvrtc.c bájtra azonos, gyors változata fut; amit az nem kezel, azt az eredeti. Debugban minden
+// textúrát az eredetivel is kibontunk és összevetünk (eltérésnél az eredeti marad), induláskor öntesztet futtatunk.
+static so_hook pvrtc_hook;
+
+static void PVRTCDecompress_fast(const void *src, int two_bit, int w, int h, uint8_t *out) {
+    const pvrtc_fn orig = ORIG(pvrtc_fn, pvrtc_hook);
+#ifdef DEBUG
+    static bool tested;
+    if (!tested) {
+        tested = true;
+        pvrtc_selftest(orig);
+    }
+#endif
+    uint64_t t = perf_tick();
+    const bool fast = pvrtc_decompress(src, two_bit, w, h, out);
+    if (!fast)
+        orig(src, two_bit, w, h, out);
+    perf.pvr_ticks += perf_tick() - t;
+    perf.pvrs++;
+#ifdef DEBUG
+    static int check = -1;   // a nopvrtccheck kapcsoló az SD-n: a valódi (kiadási) betöltési idő méréséhez
+    if (check < 0)
+        check = !file_exists(DATA_PATH "nopvrtccheck");
+    if (!fast || !check)
+        return;
+    const size_t px = (size_t)w * h * 4;
+    uint8_t *ref = malloc(px);
+    if (!ref) {
+        pvr_check.skipped++;
+        return;
+    }
+    t = perf_tick();
+    orig(src, two_bit, w, h, ref);
+    pvr_check.orig_ticks += perf_tick() - t;
+    if (memcmp(ref, out, px) == 0) {
+        pvr_check.same++;
+    } else {
+        size_t i = 0;
+        while (ref[i] == out[i])
+            i++;
+        i &= ~(size_t)3;
+        if (pvr_check.diff++ < 10)
+            log_error("pvrtc: ELTÉR – %s %dx%d, első képpont (%u, %u): eredeti %02x%02x%02x%02x, új %02x%02x%02x%02x",
+                      two_bit ? "2 bit" : "4 bit", w, h, (unsigned)(i / 4 % w), (unsigned)(i / 4 / w), ref[i],
+                      ref[i + 1], ref[i + 2], ref[i + 3], out[i], out[i + 1], out[i + 2], out[i + 3]);
+        memcpy(out, ref, px);   // a játék az eredetit kapja
+    }
+    free(ref);
+#endif
+}
+
+static void perf_end(const char *what) {
     if (!loading_t0)
         return;
     uint32_t total = perf_ms(perf_tick() - loading_t0);
     uint32_t io = perf_ms(perf.io_ticks), sh = perf_ms(perf.shader_ticks), tex = perf_ms(perf.tex_ticks);
     uint32_t swap = perf_ms(perf.swap_ticks), pvr = perf_ms(perf.pvr_ticks);
     uint32_t known = io + sh + tex + swap + pvr;
-    log_info("betöltés: %u ms, %u képkocka (csere/vsync %u ms); fájl %u ms (%u megnyitás, %u olvasás, %u MB); "
+    log_info("%s: %u ms, %u képkocka (csere/vsync %u ms); fájl %u ms (%u megnyitás, %u olvasás, %u MB); "
              "PVRTC-kibontás %u ms (%u db); shader %u ms (%u db); textúra-feltöltés %u ms (%u db); egyéb %u ms",
-             total, perf.frames, swap, io, perf.opens, perf.reads, (unsigned)(perf.io_bytes >> 20), pvr, perf.pvrs,
-             sh, perf.shaders, tex, perf.textures, total > known ? total - known : 0);
+             what, total, perf.frames, swap, io, perf.opens, perf.reads, (unsigned)(perf.io_bytes >> 20), pvr,
+             perf.pvrs, sh, perf.shaders, tex, perf.textures, total > known ? total - known : 0);
+#ifdef DEBUG
+    if (pvr_check.same || pvr_check.diff || pvr_check.skipped)
+        log_info("pvrtc-ellenőrzés: %u textúra azonos, %u ELTÉR, %u kihagyva (kevés memória); az eredeti "
+                 "ugyanezekre %u ms", pvr_check.same, pvr_check.diff, pvr_check.skipped,
+                 perf_ms(pvr_check.orig_ticks));
+#endif
     loading_t0 = 0;
+}
+
+static void GS_Loading_Release(void *self) {
+    ORIG(void (*)(void *), loading_release_hook)(self);
+    perf_end("betöltés");
+}
+
+static void GS_LoadMenu_Release(void *self) {
+    ORIG(void (*)(void *), loadmenu_release_hook)(self);
+    perf_end("menütöltés");
+    char *app = Application_GetInstance ? Application_GetInstance() : NULL;
+    if (app && loadmenu_prev_fps > 0)
+        Application_SetTargetFPS(app, loadmenu_prev_fps);
+    loadmenu_prev_fps = 0;
 }
 
 void patch_text(void) {
@@ -573,8 +726,14 @@ void patch_text(void) {
     draw_hooks();
     loading_create_hook = hook("_ZN10GS_Loading6CreateEv", GS_Loading_Create);
     loading_release_hook = hook("_ZN10GS_Loading7ReleaseEv", GS_Loading_Release);
+    loadmenu_create_hook = hook("_ZN11GS_LoadMenu6CreateEv", GS_LoadMenu_Create);
+    loadmenu_release_hook = hook("_ZN11GS_LoadMenu7ReleaseEv", GS_LoadMenu_Release);
+    Application_GetInstance = (void *(*)(void))game_sym("_ZN11Application11GetInstanceEv");
+#ifdef DEBUG
+    loadmenu_update_hook = hook("_ZN11GS_LoadMenu6UpdateEv", GS_LoadMenu_Update);
+#endif
     set_target_fps_hook = hook("_ZN11Application12SetTargetFPSEi", Application_SetTargetFPS);
-    pvrtc_hook = hook("_Z15PVRTCDecompressPKviiiPh", PVRTCDecompress_timed);
+    pvrtc_hook = hook("_Z15PVRTCDecompressPKviiiPh", PVRTCDecompress_fast);
     font_hooks();
     zone_visible_hook = hook("_ZN5CZone10SetVisibleEPKN6glitch5scene12SViewFrustumEPK11CZonePortal", CZone_SetVisible);
 

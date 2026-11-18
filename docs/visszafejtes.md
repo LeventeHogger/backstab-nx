@@ -63,7 +63,10 @@ A port a játék saját, futásidejű adatszerkezeteire épül. Ezek az eltolás
   párbeszéd (`CDialogTextBox`, `ILevelMessage`) koppintásra a sor végére, illetve a következő sorra lép.
 - **Gombfeliratok** (a `Draw`-ok `CFont::DrawString`-hívásai): `CButtonSpr` szöveg +0x88, betű +0x84, horgony +0x9c;
   `CButtonAnim` +0x98, +0x9c, +0xb0; `CButtonText` +0x80, +0x84, +0x8c. Betűk: `CSpriteManager::GetFont(s_FontSmall…)`;
-  a `DrawString` x/y logikai képpont, a `GetStringSize` képernyő-képpontot ad.
+  a `DrawString` x/y logikai képpont, a `GetStringSize` képernyő-képpontot ad. Horgonybitek: vízszintesen 1 közép,
+  2 jobb (alap bal), függőlegesen 16 közép, 32 alul (alap felül). A jobbra igazításba és a középre igazításba a
+  beágyazott ikon a rajzoltnál keskenyebben számít (a `GetStringSize` méri, és alulméri), így az ikonos felirat
+  jobbra csúszik. A jobb szélre lógó `CButtonSpr` (Skip, Continue) szövegét a játék x = 470-re, jobbra igazítja.
 - **Szövegbe ágyazott gombjelek** (`\x02<képkocka>`, az `interface.bsprite` képkockái; a képkocka-tábla: modulonkénti
   `u8` darabszám 0x2616-tól, a modulindexek `u16`-tömbje 0xc70-től): 327 ×, 330 □, 333 △, 336 ○ (a 240-es
   alapgombon a 250–253-as jel), 340 SELECT, 348/351 L/R (246 + 257/258), 321/408/363/362/405 a D-pad karjai
@@ -73,9 +76,18 @@ A port a játék saját, futásidejű adatszerkezeteire épül. Ezek az eltolás
 - A `GS_Loading::Update` képkockánként egy `CLevel::LoadStep`-et futtat, és közben `SetTargetFPS(1000)`-re vált
   (a `Release` 30-ra állítja vissza): az eredeti app a lépéseket a lehető leggyorsabban akarja. A port ilyenkor
   nem vár vsync-re (`gl.c` `gl_set_fast_frames`).
-- A betöltés idejének nagy része a PVRTC-textúrák szoftveres kibontása (`PVRTCDecompress` 0x425b60, a régi PowerVR
-  SDK 2.x képpontonkénti `Decompress`-e): Edenben 30 mp a 35-ből, 192 textúra (a 25-ös helyszín). Fájlolvasás 0,6 mp,
-  shader 0,07 mp, textúrafeltöltés 1,4 mp (a kiadási napló `betöltés:` sora).
+- Az indulás töltése a `GS_LoadMenu` (a `GS_Intro` után, a címkép – `GS_Splash` – előtt), lépésszámláló +0x18:
+  1 sprite, 4 `CGameConfig::Config`, 5 `LoadInterface`, 6 `LoadGameConfig`, **10–137 üres képkockák**, 139–155 a menü
+  háttérpályája (`GS_BaseMenu::LoadMenuLevel(20)`), utána a főmenü. A cél-fps-t ez nem emeli (`Application`+0x50 a
+  cél, +0x54 az ezredmásodperce), így a 128 üres képkocka 30 fps-sel ~4,3 mp várakozás volt – a port erre az időre
+  ugyanúgy 1000-re állítja, mint a `GS_Loading`.
+- A PVRTC-textúrákat a játék szoftveresen bontja (`PVRTCDecompress` 0x425b60, a régi PowerVR SDK 2.x képpontonkénti
+  `Decompress`-e; a segédek: `TwiddleUV` 0x425534, `InterpolateColours` 0x42539c, a moduláció a fő függvényben,
+  táblák 0x681904/0x681914). Furcsaságai: az `Unpack5554Colour` kék-kiegészítése mindig az A színt írja; a 2 bites
+  interpolált módnak nincs H/V-csak változata. A `source/pvrtc.c` ezt bájtra azonosan, szomszédságonként, NEON-nal és
+  3 szálon számolja (Edenben, egy magon a 25-ös helyszínen 30 mp → 1 mp).
+- Mérés (Eden, debug, egy mag): menütöltés 9,2 → 4,6 mp, pályatöltés 35 → 5,5 mp (fájl 0,8, textúrafeltöltés 1,9,
+  PVRTC 1,0, shader 0,3 mp). A kiadási napló `menütöltés:` és `betöltés:` sora bontja.
 
 ## Az eredeti Gameloft-csomag
 - A játék eredetileg az első induláskor töltötte le az eszközéhez illő adatcsomagot. A Tegra-változat
