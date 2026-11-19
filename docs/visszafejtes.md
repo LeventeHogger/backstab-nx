@@ -72,6 +72,29 @@ A port a játék saját, futásidejű adatszerkezeteire épül. Ezek az eltolás
   alapgombon a 250–253-as jel), 340 SELECT, 348/351 L/R (246 + 257/258), 321/408/363/362/405 a D-pad karjai
   (233/234/236/237, a játék tükrözve rakja össze), 354/397 az érintőpad (249). A 429–448 az érintéses HUD ikonjai.
 
+- **Az interface sprite memóriában** (`CSprite`, a `_PaintFrame`/`_PaintFModule` szerint): +0x40 `u16` képkockaszám,
+  +0x44 `u8*` képkockánkénti fmodul-szám, +0x48 `u16*` az első fmodul, +0x30 `u16*` az fmodul modulja, +0x34 `u8*` a
+  jelzői (1 = vízszintes tükrözés), +0x38/+0x3c `s16*` az eltolása; a modulok textúra-téglalapja +0x1c..+0x28 (`int`).
+  A 2048×2048-as atlaszban nincs szabad hely (néhány 8×8-as cella); a frame-ek által nem használt 33 modul egy részét
+  a kód közvetlenül rajzolja (`GS_QuestStoryScreen::Render`, portrék). A 397 (nézelődés) a 354 (mozgás) tükrözött
+  modulja, a 351 (R1) a 348 (L1) tükrözött pirulája. Az érintéses súgó jelei (429–448, modulok 313–335) kontrolleres
+  módban nem jelennek meg.
+- **Gombok eseményei** (`CButtonShoot`: lenyomáskor +0x80, felengedéskor +0x84, hosszú nyomás +0x88/+0x8c;
+  a `CButtonSprMulti` minden képkockában az első engedélyezett elem eseményeit másolja be, és egy gomb egyszerre
+  csak egy ujjat fogad – `CButton::touchBegan`, +0x12): kard 30/31, kivédés és kontra 47/48, csendes ölés 51/52,
+  ágyú 43/44, leszállás 45/46; ugrás 37/38, kard el (az ugrógombon) 39/40; „Second”: célzás 32/33, lövés 55/56,
+  pisztolyos kivégzés 53/54, ágyú elhagyása 41/42; pisztoly el 36 (felengedéskor); bosszú 76; ló 69; következő
+  fegyver/gránát 67
+  (`PlayerComponent::onEvent`: célzásban `IncrementGrenadeSelection(1)` + `EnterAimMode`). Célzás közben a „Second”
+  tiltva van; a lövés a helyén álló `CButtonSweep` (68 + 55; csúsztatva fegyvert vált).
+- **Séta és futás** (`PlayerComponent::onEvent`, a `WalkJoystick` 15-ös `EvStickMove`-ja, tengelyenként ±1-re vágva):
+  a `PlayerComponent`+0x2f0 beállítás +0x4c holtjátéka (0,10) alatt áll, a +0x50 × `s_walkJoystickDistanceScale`
+  (0,95 × 1) alatt sétál (bemeneti állapot 1, +0x58), fölötte fut (2). Mérve (Eden): séta 225, futás 369 egység/s,
+  a séta sebessége a kitéréstől független. Az Xperia érintőpadja (`HandleTouchpadInput`) kétszeres kitérést küld.
+- **Kontrolleres súgószövegek** (`strings.gla`, a `GS_Loading` +60 és a pályák tippjei): „Press L1 to aim / R1 to fire
+  / Release L1 to holster”, „Press □ or △ to cycle between pistol and grenades”, „○ or R1 for special attacks”,
+  „□ and R1: Vengeance”. A súgó (`GS_Help`) a `CGameSettings::s_hasDpad` szerint hagyja ki a gamepad-lapokat.
+
 ## Betöltés
 - A `GS_Loading::Update` képkockánként egy `CLevel::LoadStep`-et futtat, és közben `SetTargetFPS(1000)`-re vált
   (a `Release` 30-ra állítja vissza): az eredeti app a lépéseket a lehető leggyorsabban akarja. A port ilyenkor

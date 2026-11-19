@@ -90,14 +90,14 @@ Kész csomag a saját fájljaidból (SD-mappa + NSP + lépésenkénti útmutató
 
 | Switch | Játékmenet | Menüben |
 |---|---|---|
-| bal kar / D-pad | mozgás (kis kitérés: séta, teljes: futás) | lépés a gombok között |
+| bal kar / D-pad | mozgás (a kar 85%-áig séta, afölött futás; a D-pad fut) | lépés a gombok között |
 | jobb kar | kamera | – |
-| A | kontra (helyzettől függően interakció, bosszú); átvezetőben: Skip | a kijelölt gomb (a mentésválasztón rögtön indít) |
+| A | kontra, különleges támadás (helyzettől függően interakció, bosszú); átvezetőben: Skip | a kijelölt gomb (a mentésválasztón rögtön indít) |
 | B | ugrás; átvezetőben: a párbeszéd következő sora | vissza (a szünetmenü alfülein egy szinttel) |
-| Y | kard | – |
-| X | interakció; nyomva tartva ló hívása; célzás közben következő gránát | – |
-| ZL / L | célzás | L: előző fül |
-| ZR / R | lövés | R: következő fül |
+| Y | kard; célzás közben következő fegyver/gránát | – |
+| X | interakció; nyomva tartva ló hívása; célzás közben következő fegyver/gránát | – |
+| ZL / L | célzás: koppintásra be/ki, nyomva tartva a felengedés elteszi a pisztolyt | L: előző fül |
+| ZR / R | lövés, gránátdobás (célzás közben); különleges pisztolyos támadás | R: következő fül |
 | ZR + Y | bosszú-kombó | – |
 | − | térkép | – |
 | + | szünetmenü | – |
@@ -105,7 +105,8 @@ Kész csomag a saját fájljaidból (SD-mappa + NSP + lépésenkénti útmutató
 
 A menükben és az átvezetőkben a gombok felirata mellett a játék saját stílusában látszik a kontrollergomb
 (B a vissza-gombon és a párbeszéd-dobozon, A a kijelölt gombon, az indításon és a Skipen, L/R a szünetmenü
-fülsorának két szélső füle alatt).
+fülsorának két szélső füle alatt). A tippek és a súgó a játék kontrolleres szövegeit mutatják Switch-jelekkel:
+A/B/X/Y, ZL/ZR (célzás, lövés), L- és R-kar, D-pad, +/−.
 
 ## Beállítások
 
@@ -266,14 +267,14 @@ A ready-made package from your own files (SD folder + NSP + step-by-step guide i
 
 | Switch | Gameplay | In menus |
 |---|---|---|
-| left stick / D-pad | move (slight tilt: walk, full: run) | move between buttons |
+| left stick / D-pad | move (walk up to 85% tilt, run above; the D-pad runs) | move between buttons |
 | right stick | camera | – |
-| A | counter (depending on context: interact, vengeance); in cutscenes: Skip | press the selected button (starts the game right away on the save slot screen) |
+| A | counter, special attack (depending on context: interact, vengeance); in cutscenes: Skip | press the selected button (starts the game right away on the save slot screen) |
 | B | jump; in cutscenes: next line of dialogue | back (one level up in the pause menu's sub-tabs) |
-| Y | sword | – |
-| X | interact; hold to call the horse; while aiming: next grenade | – |
-| ZL / L | aim | L: previous tab |
-| ZR / R | shoot | R: next tab |
+| Y | sword; while aiming: next weapon/grenade | – |
+| X | interact; hold to call the horse; while aiming: next weapon/grenade | – |
+| ZL / L | aim: tap to toggle, or hold – releasing holsters the pistol | L: previous tab |
+| ZR / R | shoot, throw grenade (while aiming); pistol special attack | R: next tab |
 | ZR + Y | vengeance combo | – |
 | − | map | – |
 | + | pause menu | – |
@@ -281,7 +282,8 @@ A ready-made package from your own files (SD folder + NSP + step-by-step guide i
 
 In menus and cutscenes the controller button is shown next to the button labels, in the game's own style
 (B on the back button and the dialogue box, A on the selected button, start and Skip, L/R under the outermost
-tabs of the pause menu).
+tabs of the pause menu). Tips and help show the game's own controller texts with Switch glyphs: A/B/X/Y,
+ZL/ZR (aim, shoot), left and right stick, D-pad, +/−.
 
 ### Settings
 

@@ -31,13 +31,15 @@ nem verziózott `HANDOFF.md` (ha van); visszafejtett részletek: `docs/visszafej
 - Kipróbálható csomag Switchre: kiadási `make` + `tools/package/pack-nsp.sh`, majd `tools/package/make-package.sh` → `dist/BackstabHD-Switch/`
   (SD-mappa, NSP, magyar útmutató: `tools/package/OLVASS_EL.txt`; a játékfájlok APFS-klónként, a saját példányból; a bevezető videót `tools/assets/make-intro.sh` gyártja ffmpeg-gel:
   `files/intro.mpg`). Források: `SO`, `DATA`, `STRINGS`, `EFFECTS` környezeti változók (a szkript fejlécében).
-- Debug-kapcsolók az SD-n (`sdmc:/switch/backstab/`): `nopvrtccheck` (a gyors PVRTC-kibontást nem veti össze az eredetivel – a valódi töltési időhöz; alapból minden textúrát összevet, eltérésnél az eredeti marad, és a `pvrtc-önteszt` induláskor fut), `tiptest` (benne egy MAIN-szövegsorszám, pl. 1536 = koponyás
-  tipp: mindig ez a töltőképernyő-tipp), `ref800` (1280×800-as képernyő → a játék az eredeti `sprites_1280x800.gla`-t
+- Debug-kapcsolók az SD-n (`sdmc:/switch/backstab/`): `nopvrtccheck` (a gyors PVRTC-kibontást nem veti össze az eredetivel – a valódi töltési időhöz; alapból minden textúrát összevet, eltérésnél az eredeti marad, és a `pvrtc-önteszt` induláskor fut), `tiptest` (MAIN-szövegsorszámok, pl. 1536 = koponyás
+  tipp; több szám esetén töltőképernyőnként a következő, és mindegyikről kép készül: `shots/tip_<sorszám>`), `ref800` (1280×800-as képernyő → a játék az eredeti `sprites_1280x800.gla`-t
   tölti, DXT-vel; ehhez a csomagot a `files/`-ba kell klónozni – referencia-képhez az eredeti kinézetről, a 3D bíbor),
   `leveltest` („<kezdő index> <mp>” vagy lista „idx:mp idx:mp”: a mentés kézi betöltése után sorban végigtölti a
   pályákat, napló: `[leveltest]` + memória; a mentéseket előtte el kell tenni, mert a betöltés checkpointot ír),
   `shadertest` (1/2/3: a VertexAnim-növényzet piros / köd nélkül / fehér fénnyel), `autoinput` (időzített
-  gombnyomások, pl. a mentés betöltése gépelés nélkül: „40:SHOT 1:A 8:A …”, `controls.c`; ha van, a bevezető videó kimarad). A `leveltest` és az
+  gombnyomások, pl. a mentés betöltése gépelés nélkül: „40:SHOT 1:A 8:A …”; nyomva tartás „ZL/3000”, kar „LS0,-50”,
+  „WAITSKIP” = vár a következő átvezetőre – `controls.c`; ha van, a bevezető videó kimarad), `evlog` (a játék
+  eseményei játékmenetben: melyik gomb mit küld), `noglyphpatch` (a gombjel-képkockák átállítása nélkül). A `leveltest` és az
   `autoinput` SHOT-ja képkockát ment (`shots/*.rgba` → `tools/dev/shot2png.py`): így a teszthez nem kell a képernyőt
   fotózni, és billentyűt sem kell az Eden-ablakba küldeni. A debug-build a GL-t is figyeli
   (`dynlib.c`): le nem forduló shaderek, minden shader forrása `sdmc:/switch/backstab/shaders/<hash>.glsl`, köd- és
@@ -77,12 +79,19 @@ nem verziózott `HANDOFF.md` (ha van); visszafejtett részletek: `docs/visszafej
   → `ControlScheme`: WalkJoystick, kamera, multi-gombok; `AnalogJoystick::MAX_DISTANCE` logikai pixelben), a kamera a
   játék saját forgatás-eseményét küldi, a menük a natív Xperia Play-fókusznavigációt (`menu_action`, `CButton +0x74`).
   Részletek: `source/controls.c` fejléce. Fix (Vita-ból skálázott) érintéspontokra csak tartalékként támaszkodunk.
+  A gombok a súgók **kontrolleres (Xperia) szövegét** követik (`dpad_open` = 1, ezt látja a játékos): célzás közben a
+  „második” gomb tiltva van, a lövés a helyén álló `CButtonSweep` (ide koppint a ZR); a ZL nyomva tartva célzás, a
+  felengedés elteszi. A séta fix sebességű, a játék küszöbe |kitérés| 0,10–0,95 (`PlayerComponent`+0x2f0): a kar
+  85%-áig ebbe a sávba képezünk. Esemény-azonosítók és mérések: `docs/visszafejtes.md`.
 - **Gombjelek a játék feliratain:** a `patch.c` a `CButtonSpr::Draw` idejére a felirat (+0x88) elé teszi a
   `\x02<képkocka>` ikont (`port.h` `GLYPH_*`: a glyphs.c Switch-jelei), és utána visszaállítja – a játék
   objektumába tartósan nem írunk (a felszabadított gombokba írás memóriát rontana). Melyik gombra mi kerül: `controls.c`
   `labels_update`. Átvezetőben (a `CLevel`+0x1af8 Skip él) A = Skip, B = a párbeszéd következő sora. A jobbra
   igazított szövegbe ágyazott ikont a `CFont::DrawString` rosszul igazítja (lelóg): a jobb szélre lógó feliratnál
   a szöveg marad, az ikont a `DrawString`-hook külön rajzolja elé; a horgonybitek: `docs/visszafejtes.md`.
+  Az `interface` textúraatlaszban nincs szabad hely: ahol két súgójel közös modulon osztozott (mozgás/nézelődés,
+  L1/R1), a `patch.c` `glyph_frames_patch` a képkockát memóriában az érintéses súgó (kontrolleres módban soha meg
+  nem jelenő) moduljára állítja át (tükrözés-jelzővel együtt), a képet a `make-glyphs.py` rajzolja oda.
 - **Az 1080p-s adatcsomag `eu_font_*` fontjai nem eredetiek** (utólag gyártottak: hiányzó à é ß, a
   „small” nagyobb a „medium”-nál). Az eredeti a Gameloft 1280×800-as csomagjában van; a játék a fontot nem skálázza
   (NoScale modulméret, a sorköz is abból), ezért 1080/800-szoros modulokkal pontosan az eredeti arány jön ki.

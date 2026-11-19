@@ -27,8 +27,10 @@ void controls_note_drawn(const void *obj);
 // amelyeken a glyphs.c Switch-jelei vannak (a strings.gla gamepad-tippjei szerint).
 #define GLYPH_A 336   // ○
 #define GLYPH_B 327   // ×
-#define GLYPH_L 348
-#define GLYPH_R 351
+// A szünetmenü fülsorának L/R jele: két érintéses súgóikon képkockája, amelyre a patch.c (glyph_frames_patch) és a
+// glyphs.c a port saját L/R jelét teszi (a játék 348/351-es vállgomb-képkockája a súgókban ZL/ZR lett).
+#define GLYPH_L 430
+#define GLYPH_R 435
 // controls.c – a gomb felirata elé teendő gombjel (0: nincs), a patch.c Draw-hookjai kérdezik
 uint16_t controls_button_glyph(const void *obj);
 // heap.c – a nagy foglalások régiója (a newlib heap tetején, lefelé nő): teljes méret és foglalt rész, MB

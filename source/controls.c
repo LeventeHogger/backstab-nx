@@ -21,7 +21,8 @@
  *      +0x18 „Second” multi: 0 PistolKill, 1 CannonExit, 2 PistolShoot, 3 PistolAim
  *      +0x1c „Counter” multi: 0 CounterAttack, 1 CounterAttackGrenade, 2 Contextual (interakció),
  *                            3 Vengeance
- *      +0x20 „Horse”  multi: 0 CallHorse       +0x24 CButtonSweep (gránát)
+ *      +0x20 „Horse”  multi: 0 CallHorse       +0x24 CButtonSweep (célzás közben a lövés; csúsztatva
+ *                                                     fegyver-/gránátváltás – a „Second” helyén, ami ilyenkor tiltva)
  *    CLevel+0x1b04: CButtonMinimap (koppintásra térkép).
  *  - CButton (TouchScreenBase): +0x08 érintési téglalap (short x0,y0,x1,y1, logikai), +0x12 lenyomva,
  *    +0x15 engedélyezve (= feliratkozva az érintésekre, CButton::SetEnabled), +0x34/+0x36 helyzet.
@@ -86,6 +87,7 @@ enum { TOUCH_UP = 0, TOUCH_DOWN = 1, TOUCH_MOVE = 2 };
 #define PTR_FOCUS      15   // menüben az A: koppintás a fókuszban lévő gombra
 #define PTR_BUTTON     20   // + logikai gomb
 #define PTR_DPAD       40   // + irány
+#define PTR_TAP        50   // egyszeri koppintás (hud_tap)
 
 // A játék eseményazonosítója: kamera forgatása (EvStickMove, dx/dy logikai képpontban)
 #define EV_ROTATE_CAMERA 10
@@ -115,7 +117,7 @@ enum {
     HUD_SECOND,    // célzás / lövés / pisztolyos kivégzés / ágyú elhagyása
     HUD_COUNTER,   // kontra / interakció / bosszú
     HUD_HORSE,     // ló hívása
-    HUD_GRENADE,   // gránát (CButtonSweep)
+    HUD_GRENADE,   // célzás közben lövés / gránátdobás (CButtonSweep)
     HUD_MINIMAP,   // minitérkép (CLevel-ben)
     HUD_COUNT
 };
@@ -146,6 +148,7 @@ static void *(*Application_GetInstance)(void);
 static void *(*gxStateStack_CurrentState)(void *stack);
 static int *isPressKey;
 static int *joy_max_distance;   // AnalogJoystick::MAX_DISTANCE (logikai képpont)
+static float *walk_distance_scale;   // CGameSettings::s_walkJoystickDistanceScale (a futás-küszöb szorzója)
 
 static void *(*CLevel_GetLevel)(void);
 static void *(*CLevel_GetPlayerComponent)(void *level);
@@ -241,6 +244,12 @@ static void btn_center(const void *obj, int *sx, int *sy) {
 
 // A bal kar teljes kitérésénél a húzás a MAX_DISTANCE ennyiszerese: átlósan is telítődjön (futás).
 #define LSTICK_OVERDRIVE 1.2f
+// Séta és futás: a játék a WalkJoystick kitéréséből (|húzás| / MAX_DISTANCE, tengelyenként ±1-re vágva) dönt
+// (PlayerComponent::onEvent, 15-ös esemény; a beállítás a PlayerComponent+0x2f0-n): a holtjáték (0,10) alatt áll,
+// a futás-küszöb (0,95) alatt sétál – fix sebességgel (mérve 225 egység/s) –, fölötte fut (369 egység/s). A kar
+// ennél kisebb kitérése a séta-sávba esik (arányosan), e fölött futás; a régi, lineáris leképezésnél a kar
+// 79%-ánál már futott, ami kontrollerrel szinte mindig.
+#define LSTICK_RUN 0.85f
 
 // A jobb kar teljes kitérésénél a kamera ennyi logikai képpontnyi húzásnak megfelelő forgatást kap
 // másodpercenként (cameraSensitivity 100-nál). A korábbi, kipróbált beállítás (0,2-es
@@ -277,6 +286,8 @@ static void vtouch_release(VTouch *t, int index) {
     touch(TOUCH_UP, t->x, t->y, index);
     t->held = false;
 }
+
+static void vtap_release(void);
 
 // ---------------------------------------------------------------------------
 // Logikai gombok: a Vita-kiosztás, a Switch-gombok FIZIKAI helye szerint
@@ -322,6 +333,8 @@ static VTouch vbtn[VB_COUNT];
 static VTouch vdpad[4];
 static bool combo_active;
 static uint64_t interact_down_ms;      // a ló hívásához: mióta van lenyomva az X (0 = nincs)
+static uint64_t aim_down_ms;           // a célzást indító ZL lenyomásának ideje (0 = nincs)
+#define AIM_HOLD_MS 400                // ennél tovább tartott ZL: felengedéskor a pisztoly el
 
 static bool l_active;                  // bal joystick lenyomva
 static int l_last_x, l_last_y;         // utolsó helye (képernyő)
@@ -370,6 +383,8 @@ static TouchSlot tslot[REAL_TOUCH_MAX];
 // ---------------------------------------------------------------------------
 // Diagnosztika (csak debug-build): a felismert HUD, a változásai és a koppintások
 
+static void *player_component(void);
+
 #ifdef DEBUG
 static const char *const hud_name[HUD_COUNT] = {
     "move", "rotate", "shoot", "jump", "second", "counter", "horse", "grenade", "minimap",
@@ -377,7 +392,7 @@ static const char *const hud_name[HUD_COUNT] = {
 static const char *const vb_name[VB_COUNT] = {
     "aim", "fire", "interact", "attack", "jump", "map", "counter", "combo",
 };
-#define DEBUG_LINE_LIMIT 400   // a változás- és koppintásnapló felső korlátja
+#define DEBUG_LINE_LIMIT 1500  // a változás- és koppintásnapló felső korlátja
 static int debug_lines;
 static HudCtl hud_logged[HUD_COUNT];
 
@@ -392,7 +407,21 @@ static void hud_log_ctl(int i, const char *prefix) {
              hud_name[i], c->obj, c->enabled, c->x0, c->y0, c->x1, c->y1, cx, cy, l2sx(cx), l2sy(cy), c->elem);
 }
 
+// A játékos mozgás-beállításai (PlayerComponent+0x2f0; a WalkJoystick 15-ös eseményét így értékeli):
+// |kitérés| < +0x4c → áll, < +0x50 · s_walkJoystickDistanceScale → séta (bemeneti állapot 1), fölötte futás (2).
+static void walk_cfg_dump(void) {
+    void *pc = player_component();
+    const uint8_t *cfg = pc ? *(const uint8_t *const *)((const char *)pc + 0x2f0) : NULL;
+    float *dist = (float *)so_symbol(&so_mod, "_ZN13CGameSettings27s_walkJoystickDistanceScaleE");
+    if (!cfg)
+        return;
+    log_info("controls: mozgás-beállítás: analóg %d, holtjáték %.3f, futás-küszöb %.3f × %.3f, digitális %d/%d",
+             cfg[0x34], (double)*(const float *)(cfg + 0x4c), (double)*(const float *)(cfg + 0x50),
+             dist ? (double)*dist : -1.0, *(const int *)(cfg + 0x10), *(const int *)(cfg + 0x14));
+}
+
 static void hud_dump(void) {
+    walk_cfg_dump();
     float *walk_scale = (float *)so_symbol(&so_mod, "_ZN13CGameSettings19s_walkJoystickScaleE");
     float *walk_dist = (float *)so_symbol(&so_mod, "_ZN13CGameSettings27s_walkJoystickDistanceScaleE");
     float *walk_dtap = (float *)so_symbol(&so_mod, "_ZN12WalkJoystick15s_DoubleTapTimeE");
@@ -558,6 +587,7 @@ static int *open_cf_main_menu;
 #define SAVESLOT_SLOTS 0x14       // CMenuButtons* → std::vector<CButton*> (begin, end)
 #define SAVESLOT_START 0x2c       // CButtonSpr*
 static const void *vt_select_save;
+static const void *vt_loading;
 
 static const uint8_t *saveslot_start(void *state, const void *focused) {
     if (!state || !vt_select_save || *(const void **)state != vt_select_save)
@@ -656,6 +686,8 @@ static void release_all_virtual(void) {
         vtouch_release(&vdpad[i], PTR_DPAD + i);
     combo_active = false;
     interact_down_ms = 0;
+    aim_down_ms = 0;
+    vtap_release();
     if (l_active) {
         touch(TOUCH_UP, l_last_x, l_last_y, PTR_LSTICK);
         l_active = false;
@@ -1370,7 +1402,9 @@ static void labels_update(void) {
 static int vb_target(int vb, bool aim, bool cannon, bool horse) {
     switch (vb) {
     case VB_AIM:      return aim ? HUD_SHOOT : HUD_SECOND;            // célzás / célzás vége (PistolSheath)
-    case VB_FIRE:     return cannon ? HUD_SHOOT : HUD_SECOND;         // lövés; ágyún CannonShoot
+    // célzás közben a „második” gomb tiltva van, a lövés a helyén álló CButtonSweep (a fegyverváltó csúszka,
+    // koppintásra lő); ágyún CannonShoot, különben a második gomb (célzás / pisztolyos kivégzés)
+    case VB_FIRE:     return cannon ? HUD_SHOOT : (aim ? HUD_GRENADE : HUD_SECOND);
     case VB_INTERACT: return cannon ? HUD_SECOND : (horse ? HUD_SHOOT : HUD_COUNTER);   // CannonExit / GetOffHorse / Contextual
     case VB_ATTACK:   return horse ? HUD_COUNTER : HUD_SHOOT;
     case VB_JUMP:     return HUD_JUMP;
@@ -1401,10 +1435,19 @@ static void vita_button_pos(int vb, bool aim, bool cannon, bool horse, float *x,
     *y = vy(py);
 }
 
+// A „Shoot” gomb különleges elemei (a kard helyén megjelenő kivédés és csendes ölés). A játék kontrolleres
+// súgója szerint a különleges támadás az ○ (A) vagy az R1 (ZR): ha a kontra-gomb épp tiltva van, de a
+// kardgombon különleges elem látszik, az A arra koppint.
+#define SHOOT_ELEM_DEFLECT 2
+#define SHOOT_ELEM_SILENTKILL 3
+
 // Lenyomja a logikai gombhoz tartozó HUD-gombot. Ha a gomb most nem fogad érintést (tiltva), nem
 // koppintunk: oda a kamera-joystick kapná (képernyő-koppintás, dupla koppintás).
 static void vb_press(int vb, bool aim, bool cannon, bool horse) {
     int t = vb_target(vb, aim, cannon, horse);
+    if (vb == VB_COUNTER && hud_valid && hud[HUD_COUNTER].obj && !hud[HUD_COUNTER].enabled && hud[HUD_SHOOT].enabled &&
+        (hud[HUD_SHOOT].elem == SHOOT_ELEM_DEFLECT || hud[HUD_SHOOT].elem == SHOOT_ELEM_SILENTKILL))
+        t = HUD_SHOOT;
     int sx, sy;
     if (hud_valid && hud[t].obj) {
         bool ok = hud_point(t, &sx, &sy);
@@ -1419,6 +1462,40 @@ static void vb_press(int vb, bool aim, bool cannon, bool horse) {
         log_tap(vb, -1, sx, sy, true);
     }
     vtouch_press(&vbtn[vb], PTR_BUTTON + vb, sx, sy);
+}
+
+// Egyszeri koppintás egy HUD-gombra: lenyomás most, felengedés a következő képkockában (a játék a
+// felengedéskor küldi a gomb eseményét). Csak engedélyezett gombra.
+static VTouch vtap;
+static int vtap_index;
+
+static void vtap_release(void) {
+    vtouch_release(&vtap, vtap_index);
+}
+
+static bool hud_tap(int t, int index) {
+    int sx, sy;
+    if (!hud_valid || !hud[t].obj || !hud_point(t, &sx, &sy))
+        return false;
+    vtap_release();
+    vtap_index = index;
+    vtouch_press(&vtap, index, sx, sy);
+    return true;
+}
+
+// A játék saját „következő fegyver/gránát” eseménye (EvGeneric 67; a PlayerComponent célzás közben
+// IncrementGrenadeSelection(1) + EnterAimMode-ot hív rá) – az Xperia-kiosztás □/△ gombja is ezt küldi.
+#define EV_NEXT_WEAPON 67
+static const void *vt_ev_generic;
+
+static void next_weapon(void *pc) {
+    if (EventManager_raiseSync && event_manager && *event_manager && vt_ev_generic) {
+        struct { const void *vtable; int id; } ev = { vt_ev_generic, EV_NEXT_WEAPON };
+        EventManager_raiseSync(*event_manager, &ev);
+    } else {
+        PC_IncrementGrenadeSelection(pc, 1);
+        PC_EnterAimMode(pc);
+    }
 }
 
 // A bal joystick lenyomási pontja és teljes húzása (logikai képpont). Hamis, ha a mozgás tiltva van.
@@ -1443,10 +1520,31 @@ static bool stick_geometry(float *ox, float *oy, float *reach) {
     return true;
 }
 
+// A kar kitéréséhez (0..1, holtjáték után) tartozó húzás a MAX_DISTANCE arányában.
+static float stick_drag(void *pc, float m) {
+    float dz = 0.10f, thr = 0.95f;
+    const uint8_t *cfg = pc ? *(const uint8_t *const *)((const char *)pc + 0x2f0) : NULL;
+    if (cfg && cfg[0x34]) {
+        float d = *(const float *)(cfg + 0x4c), t = *(const float *)(cfg + 0x50);
+        if (walk_distance_scale)
+            t *= *walk_distance_scale;
+        if (d > 0.0f && d < t && t < 2.0f && t - d > 0.3f) {
+            dz = d;
+            thr = t;
+        }
+    }
+    if (m >= LSTICK_RUN)
+        return LSTICK_OVERDRIVE;
+    // a sáv széleitől távol: a játék a húzást egész logikai képpontra csonkolja (MAX_DISTANCE 67)
+    float lo = dz + 0.03f, hi = thr - 0.07f;
+    return lo + (hi - lo) * (m / LSTICK_RUN);
+}
+
 static void poll_gameplay(u32 vb_now, u64 down, u64 up, HidAnalogStickState ls, HidAnalogStickState rs,
                           uint64_t now, float dt) {
     u32 vb_down = vb_now & ~vb_prev;
     u32 vb_up = ~vb_now & vb_prev;
+    vtap_release();   // az előző képkocka egyszeri koppintása
 
     void *pc = player_component();
     bool aim = pc && PC_IsInAimMode(pc);
@@ -1454,6 +1552,13 @@ static void poll_gameplay(u32 vb_now, u64 down, u64 up, HidAnalogStickState ls, 
     bool horse = pc && PC_IsOnHorse(pc);
     bool can_call_horse = pc && PC_CanCallHorse(pc);
     bool vengeance = pc && PC_CanUseVengeance(pc) && !PC_CanUseInteractButton(pc);
+#ifdef DEBUG
+    static int last_aim = -1;
+    if (aim != last_aim) {
+        log_info("controls: célzás %s", aim ? "BE" : "ki");
+        last_aim = aim;
+    }
+#endif
 
     // R + □ együtt: „Vengeance”-kombó (a Vitán is). Amíg tart, a két gomb külön nem koppint.
     bool fire_held = vb_now & VB_BIT(VB_FIRE), attack_held = vb_now & VB_BIT(VB_ATTACK);
@@ -1481,16 +1586,27 @@ static void poll_gameplay(u32 vb_now, u64 down, u64 up, HidAnalogStickState ls, 
                 vtouch_press(&vbtn[i], PTR_BUTTON + i, cx, cy);   // felengedés lent, ugyanott
             } else if (combo_part || (vengeance && (i == VB_COUNTER || i == VB_INTERACT))) {
                 // kombó alatt / bosszú-lehetőségnél (a ○ és △ helyén a bosszú-gomb van) nem koppint
-            } else if (aim && i == VB_INTERACT) {
-                // célzás közben a △ a következő gránát/fegyver (a Vitán is)
-                PC_IncrementGrenadeSelection(pc, 1);
-                PC_EnterAimMode(pc);
+            } else if (aim && (i == VB_INTERACT || i == VB_ATTACK)) {
+                // célzás közben az X és az Y a következő gránát/fegyver – a játék kontrolleres súgója szerint
+                // („Press □ or △ to cycle between pistol and grenades”)
+                next_weapon(pc);
             } else {
+                if (i == VB_AIM)
+                    aim_down_ms = aim ? 0 : now;   // célzás indul: nyomva tartva a felengedés elteszi
                 vb_press(i, aim, cannon, horse);
             }
         }
         if ((vb_up & VB_BIT(i)) && !combo_part)
             vtouch_release(&vbtn[i], PTR_BUTTON + i);
+    }
+
+    // ZL: koppintásra be/ki (mint az érintéses „célzás” / „pisztoly el”), nyomva tartva célzás, amíg tartják:
+    // a felengedés elteszi a pisztolyt (a játék kontrolleres súgója: „Release L to holster your pistol”).
+    // Az eltevés a „Shoot” gomb PistolSheath eleme (0.), amely célzás közben az első engedélyezett.
+    if (vb_up & VB_BIT(VB_AIM)) {
+        if (aim_down_ms && now - aim_down_ms >= AIM_HOLD_MS && aim && hud[HUD_SHOOT].elem == 0)
+            hud_tap(HUD_SHOOT, PTR_TAP);
+        aim_down_ms = 0;
     }
 
     if (combo_active && !(fire_held && attack_held)) {
@@ -1535,12 +1651,43 @@ static void poll_gameplay(u32 vb_now, u64 down, u64 up, HidAnalogStickState ls, 
         l_active = false;
         l_retried = true;
     }
+#ifdef DEBUG
+    {   // a játékos bemeneti állapota (+0x58: 1 séta, 2 futás) a kar kitérésének változásakor
+        static int last_state = -1, last_pct = -1;
+        int st = pc ? *(const int *)((const char *)pc + 0x58) : -1;
+        int pct = (int)(sqrtf(lx * lx + ly * ly) * 100.0f + 0.5f);
+        // sebesség: a játékos (PlayerComponent+4 → CGameObject, helyzet +0x0c) elmozdulása fél másodpercenként
+        static float last_pos[3];
+        static uint64_t last_pos_ms;
+        const float *pos = pc && *(void **)((char *)pc + 4) ? (const float *)(*(char **)((char *)pc + 4) + 0x0c) : NULL;
+        if (pos && now - last_pos_ms >= 500) {
+            float dx = pos[0] - last_pos[0], dy = pos[1] - last_pos[1], dz = pos[2] - last_pos[2];
+            float v = sqrtf(dx * dx + dy * dy + dz * dz) * 1000.0f / (float)(now - last_pos_ms);
+            if (last_pos_ms && v > 0.01f && v < 10000.0f && debug_lines < DEBUG_LINE_LIMIT) {
+                debug_lines++;
+                log_info("controls: sebesség %.1f egység/mp (kar %d%%, állapot %d)", (double)v, pct, st);
+            }
+            memcpy(last_pos, pos, sizeof(last_pos));
+            last_pos_ms = now;
+        }
+        if ((st != last_state || abs(pct - last_pct) >= 5) && debug_lines < DEBUG_LINE_LIMIT) {
+            debug_lines++;
+            float m = sqrtf(lx * lx + ly * ly);
+            log_info("controls: bal kar %d%% → húzás %.2f × MAX_DISTANCE, állapot %d", pct,
+                     m > 0.0f ? (double)stick_drag(pc, m > 1.0f ? 1.0f : m) : 0.0, st);
+            last_state = st;
+            last_pct = pct;
+        }
+    }
+#endif
     if ((lx != 0.0f || ly != 0.0f) && can_move) {
         if (!l_active) {
             touch(TOUCH_DOWN, l2sx(ox), l2sy(oy), PTR_LSTICK);
             l_down_ms = now;
         }
-        int tx = l2sx(ox + reach * lx), ty = l2sy(oy + reach * ly);
+        float m = sqrtf(lx * lx + ly * ly);
+        float d = stick_drag(pc, m > 1.0f ? 1.0f : m) * reach / LSTICK_OVERDRIVE / m;
+        int tx = l2sx(ox + d * lx), ty = l2sy(oy + d * ly);
         touch(TOUCH_MOVE, tx, ty, PTR_LSTICK);
         l_active = true;
         l_last_x = tx;
@@ -1594,6 +1741,7 @@ void controls_init(void) {
     PC_IncrementGrenadeSelection = game_sym("_ZN15PlayerComponent25IncrementGrenadeSelectionEi");
     PC_EnterAimMode = game_sym("_ZN15PlayerComponent12EnterAimModeEv");
     joy_max_distance = game_sym("_ZN14AnalogJoystick12MAX_DISTANCEE");
+    walk_distance_scale = game_sym_opt("_ZN13CGameSettings27s_walkJoystickDistanceScaleE");
 
     screen_scale_w = game_sym_opt("s_screenScaleW");
     screen_scale_h = game_sym_opt("s_screenScaleH");
@@ -1603,6 +1751,7 @@ void controls_init(void) {
     EventManager_raiseSync = game_sym_opt("_ZN12EventManager9raiseSyncERK6IEvent");
     event_manager = game_sym_opt("_ZN12EventManager9SingletonE");
     vt_ev_stick_move = game_vtable("_ZTV11EvStickMove");
+    vt_ev_generic = game_vtable("_ZTV9EvGeneric");
     vt_scheme = game_vtable("_ZTV13ControlScheme");
     vt_scheme4 = game_vtable("_ZTV14ControlScheme4");
     const void *vt_multi = game_vtable("_ZTV15CButtonSprMulti");
@@ -1617,6 +1766,7 @@ void controls_init(void) {
     menu_action = game_sym_opt("menu_action");   // nélküle csak a szabad kurzor marad
     vt_ingame_menu = game_vtable("_ZTV13GS_InGameMenu");
     vt_select_save = game_vtable("_ZTV17GS_SelectSaveSlot");
+    vt_loading = game_vtable("_ZTV10GS_Loading");
     vt_confirm = game_vtable("_ZTV10GS_Confirm");
     vt_mmconfirm = game_vtable("_ZTV12GS_MMConfirm");
     open_cf_main_menu = game_sym_opt("is_open_cf_main_menu_screen");
@@ -1635,34 +1785,67 @@ void controls_init(void) {
 }
 
 #ifdef DEBUG
-// autoinput (csak debug): sdmc:/switch/backstab/autoinput – időzített gombnyomások a teszthez, hogy pl. a mentés
-// betöltése ne kívánjon billentyűt az Eden-ablakba. Tokenek: „<mp>:<gomb>”, az mp az előző lépéshez képest (az
-// elsőé a játék indulásától, a bevezető videó után); gomb: A B X Y L R ZL ZR PLUS MINUS UP DOWN LEFT RIGHT, vagy
-// SHOT (képkocka-mentés: shots/auto_<n>.rgba). Pl. „40:SHOT 1:A 8:A 4:A 4:DOWN 1:DOWN 1:A”.
+// autoinput (csak debug): sdmc:/switch/backstab/autoinput – időzített bevitel a teszthez, hogy pl. a mentés
+// betöltése ne kívánjon billentyűt az Eden-ablakba. Tokenek: „<mp>:<lépés>”, az mp az előző lépéshez képest (az
+// elsőé a játék indulásától, a bevezető videó után). Lépés:
+//   <gomb>        150 ms-os nyomás (A B X Y L R ZL ZR PLUS MINUS UP DOWN LEFT RIGHT)
+//   <gomb>/<ms>   nyomva tartás ennyi ms-ig (közben a többi lépés megy tovább, pl. ZL tartva + ZR)
+//   LS<x>,<y>     a bal kar helyzete %-ban (-100..100, a képernyőn lefelé pozitív y); LS0,0 = elengedve
+//   RS<x>,<y>     ugyanez a jobb karra
+//   SHOT          képkocka-mentés: shots/auto_<n>.rgba
+//   WAITSKIP      vár, amíg egy újabb (az előzőtől különböző) átvezető Skip-gombja megjelenik; a következő lépés
+//                 késleltetése ettől számít
+// Pl. „40:SHOT 1:A 8:A 4:A 4:DOWN 1:DOWN 1:A 5:LS0,-50 3:LS0,0 2:ZL/3000 1:ZR”.
 static const struct { const char *name; u64 bit; } ai_names[] = {
     {"A", HidNpadButton_A}, {"B", HidNpadButton_B}, {"X", HidNpadButton_X}, {"Y", HidNpadButton_Y},
     {"L", HidNpadButton_L}, {"R", HidNpadButton_R}, {"ZL", HidNpadButton_ZL}, {"ZR", HidNpadButton_ZR},
     {"PLUS", HidNpadButton_Plus}, {"MINUS", HidNpadButton_Minus}, {"UP", HidNpadButton_Up},
     {"DOWN", HidNpadButton_Down}, {"LEFT", HidNpadButton_Left}, {"RIGHT", HidNpadButton_Right}, {"SHOT", 0},
 };
-static struct { float delay; int name; } ai_step[64];
+#define AI_STICK_L (-1)
+#define AI_STICK_R (-2)
+#define AI_WAITSKIP (-3)
+static const void *ai_last_skip;
+static struct { float delay; int name; int hold_ms; int sx, sy; } ai_step[128];
 static int ai_n = -1, ai_pos;
-static uint64_t ai_t0, ai_release;
-static u64 ai_held;
+static uint64_t ai_t0;
+static struct { u64 bit; uint64_t until; } ai_hold[8];
+static bool ai_stick_on[2];
+static int ai_stick[2][2];
 
 static void ai_load(void) {
     ai_n = 0;
     FILE *f = fopen(DATA_PATH "autoinput", "r");
     if (!f)
         return;
-    char tok[32], name[16];
+    char tok[48], name[24];
     float d;
-    while (ai_n < 64 && fscanf(f, "%31s", tok) == 1) {
-        if (sscanf(tok, "%f:%15s", &d, name) != 2)
+    while (ai_n < 128 && fscanf(f, "%47s", tok) == 1) {
+        if (sscanf(tok, "%f:%23s", &d, name) != 2)
             continue;
+        int sx, sy;
+        if (!strcmp(name, "WAITSKIP")) {
+            ai_step[ai_n].delay = d;
+            ai_step[ai_n++].name = AI_WAITSKIP;
+            continue;
+        }
+        if ((name[0] == 'L' || name[0] == 'R') && name[1] == 'S' && sscanf(name + 2, "%d,%d", &sx, &sy) == 2) {
+            ai_step[ai_n].delay = d;
+            ai_step[ai_n].name = name[0] == 'L' ? AI_STICK_L : AI_STICK_R;
+            ai_step[ai_n].sx = sx;
+            ai_step[ai_n++].sy = sy;
+            continue;
+        }
+        int hold = 150;
+        char *slash = strchr(name, '/');
+        if (slash) {
+            hold = atoi(slash + 1);
+            *slash = 0;
+        }
         for (int i = 0; i < (int)(sizeof(ai_names) / sizeof(ai_names[0])); i++)
             if (!strcmp(name, ai_names[i].name)) {
                 ai_step[ai_n].delay = d;
+                ai_step[ai_n].hold_ms = hold;
                 ai_step[ai_n++].name = i;
             }
     }
@@ -1670,21 +1853,36 @@ static void ai_load(void) {
     log_info("[autoinput] %d lépés", ai_n);
 }
 
-// a most „lenyomott” gombok (150 ms-ig tart egy nyomás)
+// a most „lenyomott” gombok
 static u64 autoinput(uint64_t now) {
     if (ai_n < 0) {
         ai_load();
         ai_t0 = now;
     }
-    if (ai_held && now >= ai_release)
-        ai_held = 0;
-    if (!ai_held && ai_pos < ai_n && now - ai_t0 >= (uint64_t)(ai_step[ai_pos].delay * 1000.0f)) {
+    if (ai_pos < ai_n && now - ai_t0 >= (uint64_t)(ai_step[ai_pos].delay * 1000.0f)) {
         int k = ai_step[ai_pos].name;
-        log_info("[autoinput] %d/%d: %s", ai_pos + 1, ai_n, ai_names[k].name);
-        if (ai_names[k].bit) {
-            ai_held = ai_names[k].bit;
-            ai_release = now + 150;
+        if (k == AI_WAITSKIP) {
+            const uint8_t *skip = menu_mode ? NULL : cinematic_skip();
+            if (!skip || skip == ai_last_skip)
+                goto held;   // még nincs új átvezető
+            ai_last_skip = skip;
+            log_info("[autoinput] %d/%d: WAITSKIP – Skip %p", ai_pos + 1, ai_n, (const void *)skip);
+        } else if (k < 0) {
+            int s = k == AI_STICK_L ? 0 : 1;
+            ai_stick[s][0] = ai_step[ai_pos].sx;
+            ai_stick[s][1] = ai_step[ai_pos].sy;
+            ai_stick_on[s] = ai_step[ai_pos].sx || ai_step[ai_pos].sy;
+            log_info("[autoinput] %d/%d: %cS %d,%d", ai_pos + 1, ai_n, s ? 'R' : 'L', ai_stick[s][0], ai_stick[s][1]);
+        } else if (ai_names[k].bit) {
+            log_info("[autoinput] %d/%d: %s/%d", ai_pos + 1, ai_n, ai_names[k].name, ai_step[ai_pos].hold_ms);
+            for (int i = 0; i < 8; i++)
+                if (!ai_hold[i].bit || ai_hold[i].bit == ai_names[k].bit) {
+                    ai_hold[i].bit = ai_names[k].bit;
+                    ai_hold[i].until = now + (uint64_t)ai_step[ai_pos].hold_ms;
+                    break;
+                }
         } else {
+            log_info("[autoinput] %d/%d: SHOT", ai_pos + 1, ai_n);
             char shot[32];
             snprintf(shot, sizeof(shot), "auto_%02d", ai_pos + 1);
             gl_debug_shot(shot);
@@ -1692,7 +1890,23 @@ static u64 autoinput(uint64_t now) {
         ai_t0 = now;
         ai_pos++;
     }
-    return ai_held;
+held:;
+    u64 held = 0;
+    for (int i = 0; i < 8; i++) {
+        if (ai_hold[i].bit && now >= ai_hold[i].until)
+            ai_hold[i].bit = 0;
+        held |= ai_hold[i].bit;
+    }
+    return held;
+}
+
+static void ai_sticks(HidAnalogStickState *ls, HidAnalogStickState *rs) {
+    HidAnalogStickState *s[2] = { ls, rs };
+    for (int i = 0; i < 2; i++)
+        if (ai_stick_on[i]) {
+            s[i]->x = ai_stick[i][0] * JOYSTICK_MAX / 100;
+            s[i]->y = -ai_stick[i][1] * JOYSTICK_MAX / 100;   // a HID-ben a felfelé pozitív
+        }
 }
 #endif
 
@@ -1715,6 +1929,9 @@ void controls_poll(void) {
     hid_prev = buttons;
     HidAnalogStickState ls = padGetStickPos(&pad, 0);
     HidAnalogStickState rs = padGetStickPos(&pad, 1);
+#ifdef DEBUG
+    ai_sticks(&ls, &rs);
+#endif
 
     u32 vb_now = 0;
     for (int i = 0; i < VB_COUNT; i++)
@@ -1787,6 +2004,10 @@ bool controls_focus_rect(int *x, int *y, int *w, int *h) {
 
 bool controls_cursor(int *x, int *y) {
     if (!menu_mode || !menu_cursor)
+        return false;
+    // töltőképernyőn soha: a töltés végén a játék már a GS_Loading listájára teszi a pálya gombjait (Skip,
+    // párbeszéd), és dokkolva emiatt felvillant a kurzor
+    if (cur_state && vt_loading && *(void **)cur_state == vt_loading)
         return false;
     // Dokkolva látszik, ha van mire mutatni (R3-ra mindig); kézi módban (ahol ujjal is lehet), és ahol nincs
     // érintésfogadó (töltő-, címképernyő: ott bárhova koppinthat az A), csak ha a kart használták az utóbbi 4 mp-ben.

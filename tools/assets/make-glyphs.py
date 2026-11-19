@@ -32,7 +32,17 @@ GLYPHS = {
     234: (1721, 1923, 50, 44, "dpad<g"),
     236: (83, 1925, 38, 42, "dpad^"),    # függőleges kar (△; tükrözve lefelé)
     237: (0, 1875, 46, 50, "dpad^g"),
-    249: (964, 1461, 86, 85, "stick"),   # az Xperia érintőpadja (nézelődés, mozgás) → analóg kar
+    249: (964, 1461, 86, 85, "stick:L"),  # az Xperia érintőpadja: a mozgás tippje (354) → bal kar
+    # A nézelődés tippje (397) ugyanezt a modult használta; a patch.c a képkockát az érintéses súgó egyik, kontrolleres
+    # módban soha meg nem jelenő moduljára állítja át (a textúraatlaszban nincs szabad hely új képnek):
+    332: (1956, 807, 69, 67, "stick:R"),  # → jobb kar
+    # Az Xperia vállgombjai (348/351: pirula + 6×9-es betű) a súgóban célzás/lövés → ZL/ZR; a patch.c a képkockákat
+    # egy modulra (a pirulára) szűkíti, a 351-est az érintéses súgó 111×48-as moduljára állítja.
+    246: (954, 1878, 111, 48, "pill:ZL"),
+    334: (843, 1878, 111, 48, "pill:ZR"),
+    # A szünetmenü fülsorának L/R jele (a port saját felirata, port.h GLYPH_L/GLYPH_R): két érintéses súgóikon helyén.
+    319: (92, 1875, 44, 50, "tab:L"),
+    313: (46, 1875, 46, 50, "tab:R"),
 }
 
 # a játék gombjainak színei (az interface.pvr 240-es moduljából mérve)
@@ -44,6 +54,13 @@ GLOW = (255, 202, 82)
 
 def strokes(ch, w, h):
     """A jel vonalai a (0..1)² négyzetben: (pontok, zárt?) listák és ívek."""
+    if ch == "L":
+        return [[(0.26, 0.1), (0.26, 0.9), (0.8, 0.9)]]
+    if ch == "R":
+        return [[(0.24, 0.9), (0.24, 0.1), (0.54, 0.1), "arc", (0.54, 0.3, 0.2), (0.54, 0.5), (0.24, 0.5)],
+                [(0.5, 0.5), (0.8, 0.9)]]
+    if ch == "Z":
+        return [[(0.2, 0.1), (0.8, 0.1), (0.2, 0.9), (0.8, 0.9)]]
     if ch == "X":
         return [[(0.18, 0.12), (0.82, 0.88)], [(0.82, 0.12), (0.18, 0.88)]]
     if ch == "Y":
@@ -69,8 +86,10 @@ def render_button(kind, w, h):
     d = ImageDraw.Draw(img)
     cx, cy = W / 2, H / 2
     full = min(W, H) / 2
-    glow = kind.endswith("g") or kind == "stick"
+    glow = kind.endswith("g") or kind.startswith("stick")
     rb = full * (0.62 if glow else 0.9)    # a gomb sugara (a fényudvar nélkül)
+    if kind.startswith("stick"):
+        rb = 26.4 * SS                     # a 86×85-ös eredeti modul 0,62-es aránya: a két kar egyforma méretű
     if glow:                               # aranyszín fényudvar, kifelé halványodva
         for k in range(48, 0, -1):
             r = rb + (full - rb) * k / 48
@@ -98,14 +117,82 @@ def render_button(kind, w, h):
             x0, y0 = cx + math.cos(t) * r2 * 0.75, cy + math.sin(t) * r2 * 0.75
             x1, y1 = cx + math.cos(t) * r * 0.95, cy + math.sin(t) * r * 0.95
             d.line((x0, y0, x1, y1), fill=(70, 70, 74, 255), width=max(1, int(rb * 0.03)))
-        r3 = rb * 0.16
-        d.ellipse((cx - r3 - rb * 0.12, cy - r3 - rb * 0.12, cx + r3 - rb * 0.12, cy + r3 - rb * 0.12),
-                  fill=(140, 140, 146, 255))
+        letter = kind.split(":")[1] if ":" in kind else ""
+        if letter:                         # a kar betűje (L/R) a sapka közepén, világosan
+            draw_letters(d, letter, cx, cy, rb * 0.62, (240, 240, 240, 255))
+        else:
+            r3 = rb * 0.16
+            d.ellipse((cx - r3 - rb * 0.12, cy - r3 - rb * 0.12, cx + r3 - rb * 0.12, cy + r3 - rb * 0.12),
+                      fill=(140, 140, 146, 255))
+    return img.resize((w, h), Image.LANCZOS)
+
+
+def draw_letters(d, text, cx, cy, lh, ink, halo=None):
+    """Vonalas betűk (strokes) egymás mellett, (cx, cy) közepű, lh magas sorban."""
+    import math
+    lw = lh * 0.62                         # betűszélesség
+    gap = lh * 0.12
+    total = len(text) * lw + (len(text) - 1) * gap
+    x0 = cx - total / 2
+    stroke = lh * 0.16
+    layers = ([(halo, stroke * 1.9)] if halo else []) + [(ink, stroke)]
+    for color, width in layers:
+        for k, ch in enumerate(text):
+            bx = x0 + k * (lw + gap)
+            for seg in strokes(ch, 1, 1):
+                pts = []
+                i = 0
+                while i < len(seg):
+                    item = seg[i]
+                    if item == "arc":
+                        acx, acy, r = seg[i + 1]
+                        for j in range(33):
+                            a = -math.pi / 2 + math.pi * j / 32
+                            pts.append((bx + (acx + r * math.cos(a)) * lw, cy - lh / 2 + (acy + r * math.sin(a)) * lh))
+                        i += 2
+                        continue
+                    pts.append((bx + item[0] * lw, cy - lh / 2 + item[1] * lh))
+                    i += 1
+                d.line(pts, fill=color, width=max(1, int(width)), joint="curve")
+                for p in (pts[0], pts[-1]):
+                    r = width / 2
+                    d.ellipse((p[0] - r, p[1] - r, p[0] + r, p[1] + r), fill=color)
+
+
+def render_glow(d, box, rad, strength=170, steps=40):
+    """Aranyszín fényudvar egy lekerekített téglalap körül (kifelé halványodva), mint az eredeti jeleken."""
+    x0, y0, x1, y1 = box
+    for k in range(steps, 0, -1):
+        e = rad * k / steps
+        a = int(strength * (1 - k / steps) ** 1.6)
+        d.rounded_rectangle((x0 - e, y0 - e, x1 + e, y1 + e), radius=(y1 - y0) / 2 + e, fill=GLOW + (a,))
+
+
+def render_pill(text, w, h, bw, bh, glow=True):
+    """Switch-vállgomb (ZL/ZR/L/R): lekerekített gomb a játék gombszíneivel, sötét felirattal."""
+    W, H = w * SS, h * SS
+    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    cx, cy = W / 2, H / 2
+    bw, bh = bw * SS, bh * SS
+    box = (cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2)
+    if glow:
+        render_glow(d, box, min((W - bw) / 2, (H - bh) / 2) * 0.95)
+    d.rounded_rectangle(box, radius=bh / 2, fill=BTN_RIM)
+    e = bh * 0.07
+    d.rounded_rectangle((box[0] + e, box[1] + e, box[2] - e, box[3] - e), radius=bh / 2 - e, fill=BTN_RING)
+    e = bh * 0.13
+    d.rounded_rectangle((box[0] + e, box[1] + e, box[2] - e, box[3] - e), radius=bh / 2 - e, fill=BTN_FILL)
+    draw_letters(d, text, cx, cy, bh * 0.52, INK)
     return img.resize((w, h), Image.LANCZOS)
 
 
 def render(ch, w, h):
-    if ch.startswith("dpad") or ch == "stick":
+    if ch.startswith("pill:"):             # célzás/lövés: ZL/ZR (a 111×48-as modul közepén ~100×34-es gomb)
+        return render_pill(ch[5:], w, h, 100, 34)
+    if ch.startswith("tab:"):              # fülsor: L/R (44–46 széles modul)
+        return render_pill(ch[4:], w, h, 40, 28, glow=False)
+    if ch.startswith("dpad") or ch.startswith("stick"):
         return render_button(ch, w, h)
     W, H = w * SS, h * SS
     side = min(W, H)                       # a betűk négyzetben, középre; a +/− a teljes magasságban

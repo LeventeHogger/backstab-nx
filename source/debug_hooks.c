@@ -86,21 +86,40 @@ static void SetViewDistance(void *self, uint32_t dist) {
 
 static so_hook h_loading_render;
 static int tiptest = -2;   // -2: még nem olvastuk; -1: nincs
+static int tip_list[16], tip_n, tip_pos = -1;
+static void *tip_screen;   // a mostani GS_Loading (új töltőképernyőn a lista következő eleme)
+static int tip_frames;
 
+// tiptest: egy vagy több MAIN-szövegsorszám („1510 1514 1515”) – töltőképernyőnként a következő; a 40. képkockán
+// képet ment (shots/tip_<sorszám>.rgba)
 static void GS_Loading_Render(void *self) {
     if (tiptest == -2) {
         tiptest = -1;
         FILE *f = fopen(DATA_PATH "tiptest", "r");
         if (f) {
-            if (fscanf(f, "%d", &tiptest) != 1)
-                tiptest = -1;
+            while (tip_n < 16 && fscanf(f, "%d", &tip_list[tip_n]) == 1)
+                tip_n++;
             fclose(f);
-            log_info("[tiptest] töltőképernyő-tipp: %d", tiptest);
+            if (tip_n)
+                tiptest = tip_list[0];
+            log_info("[tiptest] %d töltőképernyő-tipp", tip_n);
         }
     }
     if (tiptest >= 0) {
+        if (self != tip_screen) {
+            tip_screen = self;
+            tip_pos = (tip_pos + 1) % tip_n;
+            tiptest = tip_list[tip_pos];
+            tip_frames = 0;
+            log_info("[tiptest] tipp: %d", tiptest);
+        }
         *(int *)((char *)self + 56) = tiptest;
         *(int *)((char *)self + 60) = tiptest;
+        if (++tip_frames == 40) {
+            char name[32];
+            snprintf(name, sizeof(name), "tip_%d", tiptest);
+            gl_debug_shot(name);
+        }
     }
     SO_CONTINUE(void (*)(void *), h_loading_render, self);
 }
@@ -226,6 +245,33 @@ static void Application_CheckLoadLevel(void *app) {
     SO_CONTINUE(void (*)(void *), h_check_load, app);
 }
 
+// A játék eseményei (EventManager::raiseSync: { vtábla, azonosító, … }) játékmenet közben – az irányítás
+// próbájához: melyik gomb milyen eseményt vált ki. A sűrű érintés- (4) és kar-eseményeket (10, 15) kihagyjuk,
+// az ismétlődő azonosítót 300 ms-on belül egyszer.
+//   EventManager::raiseSync(IEvent const&): push {r4-fp, lr}; ldr r4, [pc, #460]
+static so_hook h_raise_sync;
+static int ev_lines;
+
+static void EventManager_raiseSync(void *mgr, const int *ev) {
+    static void *(*get_level)(void);
+    static int last_id = -1;
+    static uint64_t last_ms;
+    if (!get_level)
+        get_level = (void *(*)(void))so_symbol(&so_mod, "_ZN6CLevel8GetLevelEv");
+    int id = ev ? ev[1] : -1;
+    if (ev_lines < 3000 && id != 4 && id != 10 && id != 15 && get_level && get_level()) {
+        uint64_t now = time_ms();
+        if (id != last_id || now - last_ms > 300) {
+            ev_lines++;
+            log_info("[ev] %d (vtábla 0x%x) +8: %d", id, (unsigned)((uintptr_t)*(void *const *)ev - so_mod.base - 8),
+                     ev[2]);
+        }
+        last_id = id;
+        last_ms = now;
+    }
+    SO_CONTINUE(void (*)(void *, const int *), h_raise_sync, mgr, ev);
+}
+
 static so_hook hook_sym(const char *name, void *dst) {
     uintptr_t a = so_symbol(&so_mod, name);
     if (!a)
@@ -240,6 +286,8 @@ void debug_hooks_install(void) {
     h_view_dist = hook_sym("_ZN13CCameraObject15SetViewDistanceEf", SetViewDistance);
     h_loading_render = hook_sym("_ZN10GS_Loading6RenderEv", GS_Loading_Render);
     h_check_load = hook_sym("_ZN11Application14CheckLoadLevelEv", Application_CheckLoadLevel);
+    if (file_exists(DATA_PATH "evlog"))
+        h_raise_sync = hook_sym("_ZN12EventManager9raiseSyncERK6IEvent", EventManager_raiseSync);
     log_info("debug_hooks: köd/látótáv naplózás be");
 }
 #else

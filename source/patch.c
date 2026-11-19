@@ -432,17 +432,15 @@ static void draw_spr(void *self, int arg) {
 static void draw_anim(void *self, int arg) { draw_labeled(&draw_h_anim, self, arg, 0x98, false); }
 static void draw_text(void *self, int arg) { draw_labeled(&draw_h_text, self, arg, 0x80, false); }
 
-#define SHOULDER_GLYPH_HALF_W 23   // logikai egység (mérve, lásd lent)
 static void draw_tab(void *self, int arg) {
     controls_note_drawn(self);
     ORIG(void (*)(void *, int), draw_h_tab)(self, arg);
     uint16_t glyph = controls_button_glyph(self);
     const int16_t *r = (const int16_t *)((char *)self + BTN_RECT);
-    // A szélső fül alá, középre (az utolsó fül és a képernyő széle közé nem fér be). A két modulból álló
-    // vállgomb-jelet a GetStringSize a rajzoltnál keskenyebbnek méri, így a középre igazítás jobbra csúszna:
-    // balra igazítjuk – a rajzolt jel közepe 1920 szélesen a megadott x után 93 képpontra (≈ 23 egység) esik.
+    // A szélső fül alá, középre (az utolsó fül és a képernyő széle közé nem fér be). Az L/R jel egymodulos
+    // képkocka, eltolás nélkül (glyph_frames_patch).
     if (glyph == GLYPH_L || glyph == GLYPH_R)
-        draw_glyph(glyph, (r[0] + r[2]) / 2 - SHOULDER_GLYPH_HALF_W, r[3] + 1, ANCHOR_LEFT | ANCHOR_TOP);
+        draw_glyph(glyph, (r[0] + r[2]) / 2, r[3] + 1, ANCHOR_HCENTER | ANCHOR_TOP);
 }
 
 // A párbeszéd-doboz B-je a doboz jobb szélén, függőlegesen középen (a szöveg sorában): a jobb alsó sarokban a
@@ -681,8 +679,73 @@ static void GS_Loading_Release(void *self) {
     perf_end("betöltés");
 }
 
+// ---------------------------------------------------------------------------
+// Gombjel-képkockák az interface sprite-ban (memóriában, egyszer, a menütöltés végén – a LoadInterface után)
+// A súgók egyes jelei közös modulon osztoztak, a Switch-jelekhez külön kép kell, a textúraatlaszban viszont nincs
+// szabad hely. Ezért néhány képkockát az érintéses súgó (kontrolleres módban – dpad_open – soha meg nem jelenő)
+// moduljaira állítunk át; a képeket a glyphs.c rajzolja oda (tools/assets/make-glyphs.py):
+//   354 mozgás  → a 249-es modul marad (bal kar);   397 nézelődés → a 332-es modulra (jobb kar)
+//   348 „L1”    → csak a 246-os pirula (ZL);         351 „R1”      → a 334-es modul (ZR), a 348 helyén
+//   GLYPH_L/R (430/435, a fülsor jele) → a 319/313-as modul (L/R), eltolás nélkül
+// A CSprite mezői (CSprite::_PaintFrame / _PaintFModule): +0x40 u16 képkockaszám, +0x44 u8* képkockánkénti
+// fmodul-szám, +0x48 u16* az első fmodul, +0x30 u16* az fmodul modulja, +0x34 u8* a jelzői (1: vízszintes
+// tükrözés – a jobb oldali „érintőpad” és vállgomb tükrözött kép volt), +0x38/+0x3c s16* az eltolása.
+static void *(*SpriteManager_GetSprite)(void *mgr, const char *name);
+static bool glyph_frames_done;
+
+static void glyph_frames_patch(void) {
+    if (glyph_frames_done || !*sprite_manager)
+        return;
+#ifdef DEBUG
+    if (file_exists(DATA_PATH "noglyphpatch")) {
+        glyph_frames_done = true;
+        return;
+    }
+#endif
+    uint8_t *spr = SpriteManager_GetSprite(*sprite_manager, "interface");
+    if (!spr)
+        return;
+    glyph_frames_done = true;
+    uint8_t *nfm = *(uint8_t **)(spr + 0x44);
+    const uint16_t *first = *(uint16_t **)(spr + 0x48);
+    uint16_t *mod = *(uint16_t **)(spr + 0x30);
+    uint8_t *flags = *(uint8_t **)(spr + 0x34);
+    int16_t *ox = *(int16_t **)(spr + 0x38), *oy = *(int16_t **)(spr + 0x3c);
+    static const struct { int frame, nfm, module; } want[] = {
+        { 348, 2, 246 }, { 351, 2, 246 }, { 354, 1, 249 }, { 397, 1, 249 }, { GLYPH_L, 1, 319 }, { GLYPH_R, 1, 313 },
+    };
+    if (*(uint16_t *)(spr + 0x40) < 448 || !nfm || !first || !mod || !flags || !ox || !oy) {
+        log_error("glyphs: az interface sprite nem a várt (képkockák: %u)", *(uint16_t *)(spr + 0x40));
+        return;
+    }
+    for (size_t i = 0; i < sizeof(want) / sizeof(want[0]); i++) {
+        int f = want[i].frame;
+        log_debug("glyphs: képkocka %d: %d fmodul, modul %d (%d,%d) jelző %d", f, nfm[f], mod[first[f]], ox[first[f]],
+                  oy[first[f]], flags[first[f]]);
+        if (nfm[f] != want[i].nfm || mod[first[f]] != want[i].module) {
+            log_error("glyphs: a %d. képkocka nem a várt – a gombjelek maradnak", f);
+            return;
+        }
+    }
+    const int zl = first[348], zr = first[351], ls = first[354], rs = first[397];
+    nfm[348] = nfm[351] = 1;              // a 6×9-es betű nélkül: a felirat a pirulán van
+    mod[zr] = 334;
+    ox[zr] = ox[zl];
+    oy[zr] = oy[zl];
+    flags[zr] = flags[zl];
+    mod[rs] = 332;                        // 69×67 a 86×85 helyett: a közepe ugyanoda essen
+    ox[rs] = (int16_t)(ox[ls] + (86 - 69) / 2);
+    oy[rs] = (int16_t)(oy[ls] + (85 - 67) / 2);
+    flags[rs] = flags[ls];
+    ox[first[GLYPH_L]] = oy[first[GLYPH_L]] = 0;
+    ox[first[GLYPH_R]] = oy[first[GLYPH_R]] = 0;
+    flags[first[GLYPH_L]] = flags[first[GLYPH_R]] = 0;
+    log_info("glyphs: L/R kar, ZL/ZR és a fülsor L/R jele beállítva");
+}
+
 static void GS_LoadMenu_Release(void *self) {
     ORIG(void (*)(void *), loadmenu_release_hook)(self);
+    glyph_frames_patch();
     perf_end("menütöltés");
     char *app = Application_GetInstance ? Application_GetInstance() : NULL;
     if (app && loadmenu_prev_fps > 0)
@@ -703,6 +766,7 @@ void patch_text(void) {
     CFont_DrawString = (void *)game_sym("_ZN5CFont10DrawStringEPKtiiihiiPt");
     SpriteManager_GetFont = (void *)game_sym("_ZN14CSpriteManager7GetFontEPKc");
     sprite_manager = (void **)game_sym("_ZN14CSpriteManager9SingletonE");
+    SpriteManager_GetSprite = (void *)game_sym("_ZN14CSpriteManager9GetSpriteEPKc");
     font_small = (const char *)game_sym("s_FontSmall");
     CFont_GetStringSize = (void *)game_sym("_ZN5CFont13GetStringSizeEPKtPiS2_S2_");
     logical_width = (int *)game_sym("s_logicalScreenWidth");
