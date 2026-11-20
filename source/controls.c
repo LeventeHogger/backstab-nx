@@ -248,10 +248,10 @@ static void btn_center(const void *obj, int *sx, int *sy) {
 #define LSTICK_OVERDRIVE 1.2f
 // Séta és futás: a játék a WalkJoystick kitéréséből (|húzás| / MAX_DISTANCE, tengelyenként ±1-re vágva) dönt
 // (PlayerComponent::onEvent, 15-ös esemény; a beállítás a PlayerComponent+0x2f0-n): a holtjáték (0,10) alatt áll,
-// a futás-küszöb (0,95) alatt sétál – fix sebességgel (mérve 225 egység/s) –, fölötte fut (369 egység/s). A kar
-// ennél kisebb kitérése a séta-sávba esik (arányosan), e fölött futás; a régi, lineáris leképezésnél a kar
-// 79%-ánál már futott, ami kontrollerrel szinte mindig.
-#define LSTICK_RUN 0.85f
+// a futás-küszöb (0,95) alatt sétál – fix sebességgel (mérve 225 egység/s) –, fölötte fut (369 egység/s).
+// Alapból mindig fut (a kar bármekkora kitérésére), az L3 (a bal kar benyomása) kapcsol séta-módba és vissza: akkor a
+// kar a séta-sávba képez (arányosan), a D-pad is sétál (Levi kérése: futás az alap, séta kapcsolóval).
+static bool walk_mode;
 
 // A jobb kar teljes kitérésénél a kamera ennyi logikai képpontnyi húzásnak megfelelő forgatást kap
 // másodpercenként (cameraSensitivity 100-nál). A korábbi, kipróbált beállítás (0,2-es
@@ -1783,11 +1783,11 @@ static float stick_drag(void *pc, float m) {
             thr = t;
         }
     }
-    if (m >= LSTICK_RUN)
+    if (!walk_mode)
         return LSTICK_OVERDRIVE;
     // a sáv széleitől távol: a játék a húzást egész logikai képpontra csonkolja (MAX_DISTANCE 67)
     float lo = dz + 0.03f, hi = thr - 0.07f;
-    return lo + (hi - lo) * (m / LSTICK_RUN);
+    return lo + (hi - lo) * m;
 }
 
 static void poll_gameplay(u32 vb_now, u64 down, u64 up, HidAnalogStickState ls, HidAnalogStickState rs,
@@ -1871,6 +1871,11 @@ static void poll_gameplay(u32 vb_now, u64 down, u64 up, HidAnalogStickState ls, 
 
     // --- bal kar és D-pad: a WalkJoystick húzása ---
 
+    if (down & HidNpadButton_StickL) {
+        walk_mode = !walk_mode;
+        log_info("controls: séta-mód %s", walk_mode ? "be" : "ki");
+    }
+
     float ox = 0.0f, oy = 0.0f, reach = 0.0f;
     bool can_move = stick_geometry(&ox, &oy, &reach) && !cannon;   // ágyún a bal kar nem mozgat
 
@@ -1878,7 +1883,8 @@ static void poll_gameplay(u32 vb_now, u64 down, u64 up, HidAnalogStickState ls, 
     for (int i = 0; i < 4; i++) {
         if ((down & dpad_hid[i]) && !vdpad[i].held && can_move) {
             vtouch_press(&vdpad[i], PTR_DPAD + i, l2sx(ox), l2sy(oy));
-            touch(TOUCH_MOVE, l2sx(ox + dpad_dir[i][0] * reach), l2sy(oy + dpad_dir[i][1] * reach), PTR_DPAD + i);
+            float d = walk_mode ? stick_drag(pc, 1.0f) * reach / LSTICK_OVERDRIVE : reach;   // séta-módban sétál
+            touch(TOUCH_MOVE, l2sx(ox + dpad_dir[i][0] * d), l2sy(oy + dpad_dir[i][1] * d), PTR_DPAD + i);
         }
         if (up & dpad_hid[i])
             vtouch_release(&vdpad[i], PTR_DPAD + i);
@@ -2043,7 +2049,7 @@ void controls_init(void) {
 // autoinput (csak debug): sdmc:/switch/backstab/autoinput – időzített bevitel a teszthez, hogy pl. a mentés
 // betöltése ne kívánjon billentyűt az Eden-ablakba. Tokenek: „<mp>:<lépés>”, az mp az előző lépéshez képest (az
 // elsőé a játék indulásától, a bevezető videó után). Lépés:
-//   <gomb>        150 ms-os nyomás (A B X Y L R ZL ZR PLUS MINUS UP DOWN LEFT RIGHT)
+//   <gomb>        150 ms-os nyomás (A B X Y L R ZL ZR PLUS MINUS UP DOWN LEFT RIGHT L3 R3)
 //   <gomb>/<ms>   nyomva tartás ennyi ms-ig (közben a többi lépés megy tovább, pl. ZL tartva + ZR)
 //   LS<x>,<y>     a bal kar helyzete %-ban (-100..100, a képernyőn lefelé pozitív y); LS0,0 = elengedve
 //   RS<x>,<y>     ugyanez a jobb karra
@@ -2055,7 +2061,8 @@ static const struct { const char *name; u64 bit; } ai_names[] = {
     {"A", HidNpadButton_A}, {"B", HidNpadButton_B}, {"X", HidNpadButton_X}, {"Y", HidNpadButton_Y},
     {"L", HidNpadButton_L}, {"R", HidNpadButton_R}, {"ZL", HidNpadButton_ZL}, {"ZR", HidNpadButton_ZR},
     {"PLUS", HidNpadButton_Plus}, {"MINUS", HidNpadButton_Minus}, {"UP", HidNpadButton_Up},
-    {"DOWN", HidNpadButton_Down}, {"LEFT", HidNpadButton_Left}, {"RIGHT", HidNpadButton_Right}, {"SHOT", 0},
+    {"DOWN", HidNpadButton_Down}, {"LEFT", HidNpadButton_Left}, {"RIGHT", HidNpadButton_Right},
+    {"L3", HidNpadButton_StickL}, {"R3", HidNpadButton_StickR}, {"SHOT", 0},
 };
 #define AI_STICK_L (-1)
 #define AI_STICK_R (-2)

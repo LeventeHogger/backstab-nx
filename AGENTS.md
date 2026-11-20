@@ -82,8 +82,8 @@ nem verziózott `HANDOFF.md` (ha van); visszafejtett részletek: `docs/visszafej
   Részletek: `source/controls.c` fejléce. Fix (Vita-ból skálázott) érintéspontokra csak tartalékként támaszkodunk.
   A gombok a súgók **kontrolleres (Xperia) szövegét** követik (`dpad_open` = 1, ezt látja a játékos): célzás közben a
   „második” gomb tiltva van, a lövés a helyén álló `CButtonSweep` (ide koppint a ZR); a ZL nyomva tartva célzás, a
-  felengedés elteszi. A séta fix sebességű, a játék küszöbe |kitérés| 0,10–0,95 (`PlayerComponent`+0x2f0): a kar
-  85%-áig ebbe a sávba képezünk. Esemény-azonosítók és mérések: `docs/visszafejtes.md`.
+  felengedés elteszi. A séta fix sebességű, a játék küszöbe |kitérés| 0,10–0,95 (`PlayerComponent`+0x2f0): alapból
+  mindig futás (teljes húzás), az L3 séta-módot kapcsol (Levi kérése), akkor ebbe a sávba képezünk. Esemény-azonosítók és mérések: `docs/visszafejtes.md`.
   A szünetmenü lapjai (`controls.c` `ingame_page`): a leltár/fegyverek/statisztika a játék saját menu_action-útját
   kapja (45–48), nem a fókuszlépést; a térkép (`poll_map`) görgetés + célkereszt-koppintás (útjelző) + 56/57-es
   gyorsbillentyű. A port `CGameSettings::s_hasDpad`-et 1-re állítja (mint a valódi Xperia Play), a súgók pedig csak a

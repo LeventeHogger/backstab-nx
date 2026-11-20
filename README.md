@@ -90,7 +90,7 @@ Kész csomag a saját fájljaidból (SD-mappa + NSP + lépésenkénti útmutató
 
 | Switch | Játékmenet | Menüben |
 |---|---|---|
-| bal kar / D-pad | mozgás (a kar 85%-áig séta, afölött futás; a D-pad fut) | lépés a gombok között |
+| bal kar / D-pad | mozgás (futás; séta-módban séta) | lépés a gombok között |
 | jobb kar | kamera | – |
 | A | kontra, különleges támadás (helyzettől függően interakció, bosszú); átvezetőben: Skip | a kijelölt gomb (a mentésválasztón rögtön indít) |
 | B | ugrás; átvezetőben: a párbeszéd következő sora | vissza (a szünetmenü alfülein egy szinttel) |
@@ -101,6 +101,7 @@ Kész csomag a saját fájljaidból (SD-mappa + NSP + lépésenkénti útmutató
 | ZR + Y | bosszú-kombó | – |
 | − | térkép | – |
 | + | szünetmenü | – |
+| L3 | séta-mód be/ki | – |
 | R3 | szabad kurzor be/ki | szabad kurzor be/ki (ahol nincs kijelölhető gomb, magától jön) |
 
 A szünetmenü lapjain: a **leltárban** a D-pad / bal kar a tárgyak között lép, az A a „Use”; a **fegyvereknél**
@@ -272,7 +273,7 @@ A ready-made package from your own files (SD folder + NSP + step-by-step guide i
 
 | Switch | Gameplay | In menus |
 |---|---|---|
-| left stick / D-pad | move (walk up to 85% tilt, run above; the D-pad runs) | move between buttons |
+| left stick / D-pad | move (run; walk in walk mode) | move between buttons |
 | right stick | camera | – |
 | A | counter, special attack (depending on context: interact, vengeance); in cutscenes: Skip | press the selected button (starts the game right away on the save slot screen) |
 | B | jump; in cutscenes: next line of dialogue | back (one level up in the pause menu's sub-tabs) |
@@ -283,6 +284,7 @@ A ready-made package from your own files (SD folder + NSP + step-by-step guide i
 | ZR + Y | vengeance combo | – |
 | − | map | – |
 | + | pause menu | – |
+| L3 | walk mode on/off | – |
 | R3 | free cursor on/off | free cursor on/off (appears automatically where there is no selectable button) |
 
 On the pause menu pages: in the **inventory** the D-pad / left stick moves between items and A is "Use"; on
