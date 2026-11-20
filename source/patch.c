@@ -197,16 +197,44 @@ static void LoadControlScheme(int scheme) {
     *dpad_open = 1;
 }
 
+static void draw_glyph(uint16_t glyph, int x, int y, int anchor);
+
 static void CMapDisplay_Draw(void *self, int param) {
     *dpad_open = 0;
     ORIG(void (*)(void *, int), map_draw_hook)(self, param);
     *dpad_open = 1;
+    int x, y;   // a célkereszt (gl.c) mellé: A = útjelző
+    if (controls_map_crosshair(self, &x, &y))
+        draw_glyph(GLYPH_A, x + 5, y + 5, ANCHOR_LEFT | ANCHOR_TOP);
 }
 
+// A szünetmenü a saját kis Xperia-gombjeleit is kirajzolja (GS_InGameMenu::Render): a szélső fülek mellé L1/R1
+// (az interface 417/420-as képkockája, a CTabControl::GetIconOffset(0/5) mellé), a Resume fölé START (449), a
+// „Back to menu” fölé a kis ○ (426) és egy kis □ (465). A port saját jelei a gombokon/füleken vannak (és a ○ itt
+// félrevezető lenne), ezért a rajzolás idejére ezeket üresre állítjuk (fmodul-szám 0; glyph_frames_patch).
+static uint8_t *iface_nfm;
+static void **sprite_manager;                                          // (lent: a gombjeleknél)
+static void *(*SpriteManager_GetSprite)(void *mgr, const char *name);
+static const uint16_t ingame_hidden_frames[] = { 417, 420, 449, 426, 465 };
+#define INGAME_HIDDEN_COUNT ((int)(sizeof(ingame_hidden_frames) / sizeof(ingame_hidden_frames[0])))
+
 static void GS_InGameMenu_Render(void *self) {
+    // az interface sprite egyszer töltődik be; ha mégis újratöltődne, a régi tömbjébe nem írunk
+    if (iface_nfm && *sprite_manager) {
+        uint8_t *spr = SpriteManager_GetSprite(*sprite_manager, "interface");
+        if (!spr || *(uint8_t **)(spr + 0x44) != iface_nfm)
+            iface_nfm = NULL;
+    }
+    uint8_t keep[INGAME_HIDDEN_COUNT];
+    for (int i = 0; iface_nfm && i < INGAME_HIDDEN_COUNT; i++) {
+        keep[i] = iface_nfm[ingame_hidden_frames[i]];
+        iface_nfm[ingame_hidden_frames[i]] = 0;
+    }
     *dpad_open = 0;
     ORIG(void (*)(void *), ingame_menu_render_hook)(self);
     *dpad_open = 1;
+    for (int i = 0; iface_nfm && i < INGAME_HIDDEN_COUNT; i++)
+        iface_nfm[ingame_hidden_frames[i]] = keep[i];
 }
 
 // ---------------------------------------------------------------------------
@@ -345,6 +373,16 @@ static const uint16_t *edge_text, *edge_orig;
 static void draw_labeled(so_hook *h, void *self, int arg, int text_off, bool edge_shift) {
     controls_note_drawn(self);
     uint16_t glyph = controls_button_glyph(self);
+    int side = glyph ? controls_button_glyph_side(self) : 0;
+    if (side) {   // felirat nélküli ikongomb (pl. a térkép „középre” gombja): a jel mellé kerül
+        ORIG(void (*)(void *, int), *h)(self, arg);
+        const int16_t *r = (const int16_t *)((char *)self + BTN_RECT);
+        if (side == 1)
+            draw_glyph(glyph, r[2] + 3, (r[1] + r[3]) / 2, ANCHOR_LEFT | ANCHOR_VCENTER);
+        else
+            draw_glyph(glyph, r[0] - 3, (r[1] + r[3]) / 2, ANCHOR_RIGHT | ANCHOR_VCENTER);
+        return;
+    }
     const uint16_t **text = (const uint16_t **)((char *)self + text_off);
     const uint16_t *orig = *text;
     bool has_text = orig && orig[0];
@@ -429,7 +467,42 @@ static void draw_spr(void *self, int arg) {
     draw_labeled(&draw_h_spr, self, arg, 0x88, true);
     *pos_x = old_x;
 }
-static void draw_anim(void *self, int arg) { draw_labeled(&draw_h_anim, self, arg, 0x98, false); }
+#ifdef DEBUG
+// glyphtest (sdmc:/switch/backstab/glyphtest): a főmenün az interface sprite gombjel-képkockái rácsban, alattuk a
+// sorszámuk – a súgójelek egy képen ellenőrizhetők (autoinput SHOT).
+static void glyph_grid(void) {
+    static int on = -1;
+    if (on < 0)
+        on = file_exists(DATA_PATH "glyphtest");
+    void *font = on && *sprite_manager ? SpriteManager_GetFont(*sprite_manager, font_small) : NULL;
+    if (!font)
+        return;
+    static const uint16_t frames[] = {
+        325, 326, 327, 328, 329, 330, 331, 332, 333, 334, 335, 336, 337, 338, 339, 340, 341, 342, 343, 344,
+        345, 346, 347, 348, 349, 350, 351, 389, 390, 385, 386, 387, 388, 391, 392, 393, 394, 417, 418, 419,
+        420, 421, 422, 449, 354, 397, 430, 435, 320, 321, 322, 323, 324, 362, 363, 405, 408,
+    };
+    for (int i = 0; i < (int)(sizeof(frames) / sizeof(frames[0])); i++) {
+        int x = 22 + (i % 12) * 38, y = 40 + (i / 12) * 52;
+        const uint16_t g[3] = { 2, frames[i], 0 };
+        CFont_DrawString(font, g, x, y, ANCHOR_HCENTER | ANCHOR_VCENTER, 255, 0, 0x10000, NULL);
+        char num[8];
+        snprintf(num, sizeof(num), "%d", frames[i]);
+        uint16_t t[8];
+        int k = 0;
+        for (; num[k]; k++)
+            t[k] = (uint16_t)num[k];
+        t[k] = 0;
+        CFont_DrawString(font, t, x, y + 20, ANCHOR_HCENTER | ANCHOR_TOP, 255, 0, 0x10000, NULL);
+    }
+}
+#endif
+static void draw_anim(void *self, int arg) {
+    draw_labeled(&draw_h_anim, self, arg, 0x98, false);
+#ifdef DEBUG
+    glyph_grid();
+#endif
+}
 static void draw_text(void *self, int arg) { draw_labeled(&draw_h_text, self, arg, 0x80, false); }
 
 static void draw_tab(void *self, int arg) {
@@ -682,16 +755,42 @@ static void GS_Loading_Release(void *self) {
 // ---------------------------------------------------------------------------
 // Gombjel-képkockák az interface sprite-ban (memóriában, egyszer, a menütöltés végén – a LoadInterface után)
 // A súgók egyes jelei közös modulon osztoztak, a Switch-jelekhez külön kép kell, a textúraatlaszban viszont nincs
-// szabad hely. Ezért néhány képkockát az érintéses súgó (kontrolleres módban – dpad_open – soha meg nem jelenő)
-// moduljaira állítunk át; a képeket a glyphs.c rajzolja oda (tools/assets/make-glyphs.py):
-//   354 mozgás  → a 249-es modul marad (bal kar);   397 nézelődés → a 332-es modulra (jobb kar)
-//   348 „L1”    → csak a 246-os pirula (ZL);         351 „R1”      → a 334-es modul (ZR), a 348 helyén
+// szabad hely. Ezért a képkockákat az érintéses súgó (kontrolleres módban – dpad_open – soha meg nem jelenő)
+// moduljaira állítjuk át; a képeket a glyphs.c rajzolja oda (tools/assets/make-glyphs.py). A játék minden
+// gombjelet három méretben tárol (kicsi/közepes/nagy, a HUD-tippek ezek között animálnak – pl. az ágyú „tüzelj”
+// jele): a vállgomb- és SELECT/START-jelnek mindhárom változatát átállítjuk, különben az animáció a régi és az új
+// jel között villogna. Az új kép az eredeti képkocka legnagyobb moduljának közepére kerül, tükrözés nélkül.
+//   354 mozgás → a 249-es modul marad (bal kar);  397 nézelődés → 332 (jobb kar)
+//   L1: 346/347/348/389/417–419 → 246 (ZL);       R1: 349/350/351/390/420–422 → 334 (ZR)
+//   SELECT: 340–342 → 331 (−);                    START: 343–345, 449 → 335 (+)
 //   GLYPH_L/R (430/435, a fülsor jele) → a 319/313-as modul (L/R), eltolás nélkül
-// A CSprite mezői (CSprite::_PaintFrame / _PaintFModule): +0x40 u16 képkockaszám, +0x44 u8* képkockánkénti
-// fmodul-szám, +0x48 u16* az első fmodul, +0x30 u16* az fmodul modulja, +0x34 u8* a jelzői (1: vízszintes
-// tükrözés – a jobb oldali „érintőpad” és vállgomb tükrözött kép volt), +0x38/+0x3c s16* az eltolása.
+// A CSprite mezői (CSprite::_PaintFrame / _PaintFModule / GetModuleWidthNoScale): +0x14/+0x18 s16* a modulok
+// mérete, +0x40 u16 képkockaszám, +0x44 u8* képkockánkénti fmodul-szám, +0x48 u16* az első fmodul, +0x30 u16* az
+// fmodul modulja, +0x34 u8* a jelzői (1: vízszintes tükrözés), +0x38/+0x3c s16* az eltolása.
 static void *(*SpriteManager_GetSprite)(void *mgr, const char *name);
 static bool glyph_frames_done;
+
+#define MOD_ZL 246
+#define MOD_ZR 334
+#define MOD_RSTICK 332
+#define MOD_MINUS 331
+#define MOD_PLUS 335
+static const struct {
+    uint16_t frame, n, m0, m1;   // az elvárt eredeti tartalom (n fmodul, az első kettő modulja)
+    uint16_t module;             // az új modul (0: nem változik)
+} glyph_frame_map[] = {
+    { 346, 2, 244, 257, MOD_ZL }, { 347, 2, 245, 257, MOD_ZL }, { 348, 2, 246, 257, MOD_ZL },
+    { 389, 2, 244, 257, MOD_ZL }, { 417, 2, 304, 257, MOD_ZL }, { 418, 2, 305, 257, MOD_ZL },
+    { 419, 2, 306, 257, MOD_ZL },
+    { 349, 2, 244, 258, MOD_ZR }, { 350, 2, 245, 258, MOD_ZR }, { 351, 2, 246, 258, MOD_ZR },
+    { 390, 2, 244, 258, MOD_ZR }, { 420, 2, 304, 258, MOD_ZR }, { 421, 2, 305, 258, MOD_ZR },
+    { 422, 2, 306, 258, MOD_ZR },
+    { 340, 2, 255, 241, MOD_MINUS }, { 341, 2, 255, 242, MOD_MINUS }, { 342, 2, 255, 243, MOD_MINUS },
+    { 343, 2, 256, 241, MOD_PLUS }, { 344, 2, 256, 242, MOD_PLUS }, { 345, 2, 256, 243, MOD_PLUS },
+    { 449, 3, 346, 337, MOD_PLUS },   // START a kis pirulán, nyíllal (a térkép bal alsó sarkában)
+    { 354, 1, 249, 0, 0 }, { 397, 1, 249, 0, MOD_RSTICK },
+    { GLYPH_L, 1, 319, 0, 0 }, { GLYPH_R, 1, 313, 0, 0 },
+};
 
 static void glyph_frames_patch(void) {
     if (glyph_frames_done || !*sprite_manager)
@@ -706,45 +805,104 @@ static void glyph_frames_patch(void) {
     if (!spr)
         return;
     glyph_frames_done = true;
+    const int16_t *mw = *(int16_t **)(spr + 0x14), *mh = *(int16_t **)(spr + 0x18);
     uint8_t *nfm = *(uint8_t **)(spr + 0x44);
     const uint16_t *first = *(uint16_t **)(spr + 0x48);
     uint16_t *mod = *(uint16_t **)(spr + 0x30);
     uint8_t *flags = *(uint8_t **)(spr + 0x34);
     int16_t *ox = *(int16_t **)(spr + 0x38), *oy = *(int16_t **)(spr + 0x3c);
-    static const struct { int frame, nfm, module; } want[] = {
-        { 348, 2, 246 }, { 351, 2, 246 }, { 354, 1, 249 }, { 397, 1, 249 }, { GLYPH_L, 1, 319 }, { GLYPH_R, 1, 313 },
-    };
-    if (*(uint16_t *)(spr + 0x40) < 448 || !nfm || !first || !mod || !flags || !ox || !oy) {
+    if (*(uint16_t *)(spr + 0x40) < 466 || !mw || !mh || !nfm || !first || !mod || !flags || !ox || !oy) {
         log_error("glyphs: az interface sprite nem a várt (képkockák: %u)", *(uint16_t *)(spr + 0x40));
         return;
     }
-    for (size_t i = 0; i < sizeof(want) / sizeof(want[0]); i++) {
-        int f = want[i].frame;
-        log_debug("glyphs: képkocka %d: %d fmodul, modul %d (%d,%d) jelző %d", f, nfm[f], mod[first[f]], ox[first[f]],
-                  oy[first[f]], flags[first[f]]);
-        if (nfm[f] != want[i].nfm || mod[first[f]] != want[i].module) {
+    iface_nfm = nfm;   // a szünetmenü fülsor-jeleihez (GS_InGameMenu_Render)
+    const size_t count = sizeof(glyph_frame_map) / sizeof(glyph_frame_map[0]);
+    for (size_t i = 0; i < count; i++) {   // előbb mindet ellenőrizzük: vagy mind, vagy egyik sem
+        int f = glyph_frame_map[i].frame, k = first[f];
+        bool ok = nfm[f] == glyph_frame_map[i].n && mod[k] == glyph_frame_map[i].m0 &&
+                  (glyph_frame_map[i].n < 2 || mod[k + 1] == glyph_frame_map[i].m1);
+        for (int j = k; ok && j < k + nfm[f]; j++)
+            ok = !(flags[j] & 0x10);   // 0x10: az fmodul képkockára hivatkozik, nem modulra (_PaintFModule)
+        if (!ok) {
             log_error("glyphs: a %d. képkocka nem a várt – a gombjelek maradnak", f);
             return;
         }
     }
-    const int zl = first[348], zr = first[351], ls = first[354], rs = first[397];
-    nfm[348] = nfm[351] = 1;              // a 6×9-es betű nélkül: a felirat a pirulán van
-    mod[zr] = 334;
-    ox[zr] = ox[zl];
-    oy[zr] = oy[zl];
-    flags[zr] = flags[zl];
-    mod[rs] = 332;                        // 69×67 a 86×85 helyett: a közepe ugyanoda essen
-    ox[rs] = (int16_t)(ox[ls] + (86 - 69) / 2);
-    oy[rs] = (int16_t)(oy[ls] + (85 - 67) / 2);
-    flags[rs] = flags[ls];
+    for (size_t i = 0; i < count; i++) {
+        int f = glyph_frame_map[i].frame, k = first[f], m = glyph_frame_map[i].module;
+        if (!m)
+            continue;
+        int big = k;   // a legnagyobb modul közepe: oda kerül az új kép
+        for (int j = k + 1; j < k + nfm[f]; j++)
+            if (mw[mod[j]] * mh[mod[j]] > mw[mod[big]] * mh[mod[big]])
+                big = j;
+        const int cx = ox[big] + mw[mod[big]] / 2, cy = oy[big] + mh[mod[big]] / 2;
+        nfm[f] = 1;
+        mod[k] = (uint16_t)m;
+        flags[k] = 0;
+        ox[k] = (int16_t)(cx - mw[m] / 2);
+        oy[k] = (int16_t)(cy - mh[m] / 2);
+    }
     ox[first[GLYPH_L]] = oy[first[GLYPH_L]] = 0;
     ox[first[GLYPH_R]] = oy[first[GLYPH_R]] = 0;
     flags[first[GLYPH_L]] = flags[first[GLYPH_R]] = 0;
-    log_info("glyphs: L/R kar, ZL/ZR és a fülsor L/R jele beállítva");
+    log_info("glyphs: L/R kar, ZL/ZR, −/+ és a fülsor L/R jele beállítva (%u képkocka)", (unsigned)count);
+}
+
+// ---------------------------------------------------------------------------
+// Kontrolleres súgó. A valódi Xperia Play-en a játék CGameSettings::s_hasDpad = 1-et állít (S_SetDeviceXperia
+// 0x20ea5c, a s_wideResolution 1, a s_hasQuitButton 0 mellett); a port eszköze nem Xperia, így 0 maradt, és a súgó
+// (CTab::Update – a szünetmenü Help → Controls lapja –, GS_Help – a főmenü súgója) az érintéses oldalakat mutatta,
+// az érintéses ikonokkal (429–448: ezek egy részét a glyph_frames_patch a saját jeleire használja). A Controls-súgó
+// a MAIN 1481-es szövegétől: 1481–1504 érintéses, 1505–1529 a kontrolleres változat. A játék az utolsó oldal indexét
+// tárolja (24 oldalnál 23). A CTab a kontrolleres oldalakat s_hasDpad nélkül átugorja (48 − 25), vele mindet mutatná;
+// a főmenü súgója (GS_PreHelp → GS_Help(1481, 1504, …)) eleve csak az érintéseseket. Ezért s_hasDpad = 1, és mindkét
+// súgó csak a kontrolleres oldalakat kapja (1505–1529, utolsó index 24):
+//   CTab::Update +0x1ec: movw r7, #1481 (e30075c9) → #1505;   +0x1f0: movne r3, #48 (13a03030) → #24
+//   CTab::Draw   +0x598: movw r8, #1481 (e30085c9) → #1505;   +0x59c: movne r3, #23 (13a03017) → #24
+//   GS_Help: +0x3c az első szöveg, +0x40 az utolsó, +0x30 az utolsó oldal indexe (Create után)
+#define HELP_TOUCH_FIRST 1481
+#define HELP_TOUCH_LAST  1504
+#define HELP_PAD_FIRST   1505
+#define HELP_PAD_LAST    1529
+static so_hook help_create_hook;
+static int8_t *s_has_dpad;
+
+static void help_pages_patch(void) {
+    static const struct { const char *fn; uint32_t off, old, new_; } code[] = {
+        { "_ZN4CTab6UpdateEv", 0x1ec, 0xe30075c9, 0xe30075e1 },   // movw r7, #1505
+        { "_ZN4CTab6UpdateEv", 0x1f0, 0x13a03030, 0x13a03018 },   // movne r3, #24
+        { "_ZN4CTab4DrawEi", 0x598, 0xe30085c9, 0xe30085e1 },     // movw r8, #1505
+        { "_ZN4CTab4DrawEi", 0x59c, 0x13a03017, 0x13a03018 },     // movne r3, #24
+    };
+    const size_t n = sizeof(code) / sizeof(code[0]);
+    uint32_t *at[sizeof(code) / sizeof(code[0])];
+    for (size_t i = 0; i < n; i++) {   // előbb mind ellenőrizve: vagy mind, vagy egyik sem
+        uintptr_t f = so_symbol(&so_mod, code[i].fn);
+        at[i] = f ? so_va(&so_mod, f + code[i].off) : NULL;
+        if (!at[i] || *at[i] != code[i].old) {
+            log_error("patch: a súgó-utasítás nem a várt (%s+0x%x) – a súgó érintéses marad", code[i].fn,
+                      (unsigned)code[i].off);
+            return;
+        }
+    }
+    for (size_t i = 0; i < n; i++)
+        *at[i] = code[i].new_;
+}
+
+static void GS_Help_Create(void *self) {
+    ORIG(void (*)(void *), help_create_hook)(self);
+    int *first = (int *)((char *)self + 0x3c), *last = (int *)((char *)self + 0x40), *pages = (int *)((char *)self + 0x30);
+    if (*first == HELP_TOUCH_FIRST && *last == HELP_TOUCH_LAST) {   // a főmenü Controls-súgója
+        *first = HELP_PAD_FIRST;
+        *last = HELP_PAD_LAST;
+        *pages = HELP_PAD_LAST - HELP_PAD_FIRST;
+    }
 }
 
 static void GS_LoadMenu_Release(void *self) {
     ORIG(void (*)(void *), loadmenu_release_hook)(self);
+    *s_has_dpad = 1;   // a GS_Splash (cím) és a súgók már ezt látják
     glyph_frames_patch();
     perf_end("menütöltés");
     char *app = Application_GetInstance ? Application_GetInstance() : NULL;
@@ -792,6 +950,9 @@ void patch_text(void) {
     loading_release_hook = hook("_ZN10GS_Loading7ReleaseEv", GS_Loading_Release);
     loadmenu_create_hook = hook("_ZN11GS_LoadMenu6CreateEv", GS_LoadMenu_Create);
     loadmenu_release_hook = hook("_ZN11GS_LoadMenu7ReleaseEv", GS_LoadMenu_Release);
+    s_has_dpad = (int8_t *)game_sym("_ZN13CGameSettings9s_hasDpadE");
+    help_pages_patch();
+    help_create_hook = hook("_ZN7GS_Help6CreateEv", GS_Help_Create);
     Application_GetInstance = (void *(*)(void))game_sym("_ZN11Application11GetInstanceEv");
 #ifdef DEBUG
     loadmenu_update_hook = hook("_ZN11GS_LoadMenu6UpdateEv", GS_LoadMenu_Update);

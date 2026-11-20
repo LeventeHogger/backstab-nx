@@ -103,6 +103,11 @@ Kész csomag a saját fájljaidból (SD-mappa + NSP + lépésenkénti útmutató
 | + | szünetmenü | – |
 | R3 | szabad kurzor be/ki | szabad kurzor be/ki (ahol nincs kijelölhető gomb, magától jön) |
 
+A szünetmenü lapjain: a **leltárban** a D-pad / bal kar a tárgyak között lép, az A a „Use”; a **fegyvereknél**
+fel/le a fegyverek között, az A az „Equip”; a **statisztikánál** fel/le görget; a **súgóban** balra/jobbra lapoz.
+A **térképen** (játék közben a − is ezt nyitja) a bal kar és a D-pad görget, az A a középső célkeresztre teszi (vagy
+onnan törli) az útjelzőt, a Y visszaugrik a játékoshoz, az X hívja a lovat, a − nyitja a jelmagyarázatot.
+
 A menükben és az átvezetőkben a gombok felirata mellett a játék saját stílusában látszik a kontrollergomb
 (B a vissza-gombon és a párbeszéd-dobozon, A a kijelölt gombon, az indításon és a Skipen, L/R a szünetmenü
 fülsorának két szélső füle alatt). A tippek és a súgó a játék kontrolleres szövegeit mutatják Switch-jelekkel:
@@ -279,6 +284,11 @@ A ready-made package from your own files (SD folder + NSP + step-by-step guide i
 | − | map | – |
 | + | pause menu | – |
 | R3 | free cursor on/off | free cursor on/off (appears automatically where there is no selectable button) |
+
+On the pause menu pages: in the **inventory** the D-pad / left stick moves between items and A is "Use"; on
+**weapons** up/down picks a weapon and A is "Equip"; **stats** scroll with up/down; **help** pages turn with
+left/right. On the **map** (− also opens it during play) the left stick and D-pad scroll, A sets (or removes) the
+waypoint at the centre crosshair, Y re-centres on the player, X calls the horse, − opens the legend.
 
 In menus and cutscenes the controller button is shown next to the button labels, in the game's own style
 (B on the back button and the dialogue box, A on the selected button, start and Skip, L/R under the outermost

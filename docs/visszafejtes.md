@@ -95,6 +95,27 @@ A port a játék saját, futásidejű adatszerkezeteire épül. Ezek az eltolás
   / Release L1 to holster”, „Press □ or △ to cycle between pistol and grenades”, „○ or R1 for special attacks”,
   „□ and R1: Vengeance”. A súgó (`GS_Help`) a `CGameSettings::s_hasDpad` szerint hagyja ki a gamepad-lapokat.
 
+- **Szünetmenü-lapok** (`GS_InGameMenu`): a `CTabControl` (+0x10) +0x8c/+0x90 fülvektor, +0x98 a mostani fül; a
+  fül (`CTab`) gyerekei +0xb4/+0xb8. A lapok kijelzői (a fül egyetlen gyereke): +0x58 statisztika, +0x5c leltár,
+  +0x60 térkép, +0x64 küldetések, +0x68 fegyverek. A `CButton::Update` a fókuszban lévő gombot a menu_action 49-re,
+  bármelyik engedélyezett gombot a saját gyorsbillentyűjére (+0x78) nyomja meg. Leltár (`CInventoryDisplay`): +0xa0 a
+  kijelölt, +0x94 a 20 bájtos elemek vektora (+0x0c a típus; 1 = használható), +0x8c a „Use” (csak használható
+  tárgynál rajzolódik, de mindig fogad érintést); 45–48 lépteti a 4 oszlopos rácsot. Fegyverek (`CUpgradesDisplay`):
+  45/46 a sorok között, +0x88 „Equip” (gyorsbillentyűje 49). Statisztika: a görgetősáv 45/46-ra görget.
+- **Térkép** (`CMapDisplay`, a szünetmenü 4. füle; a minitérkép 75-ös eseménye is ezt nyitja): nincs nagyítás és
+  utazás. +0xdc/+0xe0 a görgetés (`UpdatePosition` 0x27ebc8 korlátozza), +0xd8 a lépték, +0xe4/+0xe8 a játékos helye,
+  +0x90 a jelmagyarázat állapota, +0xb8/+0xbc/+0xc0 a jelmagyarázat / középre (gyorsbillentyű 57) / ló (56) gombja.
+  A D-pad (45–48) gyorsulva görget; az útjelzőnek csak érintéses útja van: koppintás (±10 egységen belüli felengedés) a
+  térképen lerakja, áthelyezi, a jelére koppintva törli. A húzás 40 egységen túl a pálya tutorial-szövegét
+  (`CLevel`+0x1a5c/+0x1a60) törli; a `CLevel`+0x1acc rejti a térképet.
+- **Súgó:** a Controls-súgó szövegei a MAIN 1481–1504 (érintéses) és 1505–1529 (kontrolleres); a `CTab::Update`/`Draw`
+  (+0xdc: 0 Controls, 1 Hints 1530-tól, 2 Collectibles 1539-től) és a főmenü `GS_PreHelp` → `GS_Help(első, utolsó, cím)`
+  az utolsó oldal indexével számol. A `CGameSettings::s_hasDpad` (a valódi Xperia Play-en 1) nélkül a kontrolleres
+  oldalak kimaradnak; a cím (`GS_Splash`) is ettől írja ki a „Press any key”-t.
+- **A szünetmenü saját gombjelei** (`GS_InGameMenu::Render`): 417/420 a szélső fülek mellett, 449 (START) a Resume,
+  426 (kis ○) vagy 465 (kis □) a „Back to menu” fölött. A kis gombjelek: 307–309-es alap (három méret) + 310 □,
+  311 ○, 349 △, 350 ×.
+
 ## Betöltés
 - A `GS_Loading::Update` képkockánként egy `CLevel::LoadStep`-et futtat, és közben `SetTargetFPS(1000)`-re vált
   (a `Release` 30-ra állítja vissza): az eredeti app a lépéseket a lehető leggyorsabban akarja. A port ilyenkor

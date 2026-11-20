@@ -27,12 +27,20 @@ void controls_note_drawn(const void *obj);
 // amelyeken a glyphs.c Switch-jelei vannak (a strings.gla gamepad-tippjei szerint).
 #define GLYPH_A 336   // ○
 #define GLYPH_B 327   // ×
+#define GLYPH_X 333   // △
+#define GLYPH_Y 330   // □
+#define GLYPH_MINUS 340   // SELECT
 // A szünetmenü fülsorának L/R jele: két érintéses súgóikon képkockája, amelyre a patch.c (glyph_frames_patch) és a
 // glyphs.c a port saját L/R jelét teszi (a játék 348/351-es vállgomb-képkockája a súgókban ZL/ZR lett).
 #define GLYPH_L 430
 #define GLYPH_R 435
 // controls.c – a gomb felirata elé teendő gombjel (0: nincs), a patch.c Draw-hookjai kérdezik
 uint16_t controls_button_glyph(const void *obj);
+// a gombjel helye: 0 a felirat elején, 1 a gomb jobb oldalán, 2 a bal oldalán (felirat nélküli ikongombokhoz)
+int controls_button_glyph_side(const void *obj);
+// controls.c – a térkép lapján (szünetmenü) a célkereszt helye, logikai képpontban; hamis, ha most nincs. A map
+// (ha nem NULL) a kirajzolt CMapDisplay: csak a mostani térképre ad igazat.
+bool controls_map_crosshair(const void *map, int *x, int *y);
 // heap.c – a nagy foglalások régiója (a newlib heap tetején, lefelé nő): teljes méret és foglalt rész, MB
 void heap_stats(unsigned *region_mb, unsigned *used_mb);
 // audio.c – a bevezető videó hangja: 16 bites sztereó PCM (blokkol, amíg a kimenet be nem fogadja); a végén

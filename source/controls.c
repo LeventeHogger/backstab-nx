@@ -87,6 +87,8 @@ enum { TOUCH_UP = 0, TOUCH_DOWN = 1, TOUCH_MOVE = 2 };
 #define PTR_FOCUS      15   // menüben az A: koppintás a fókuszban lévő gombra
 #define PTR_BUTTON     20   // + logikai gomb
 #define PTR_DPAD       40   // + irány
+#define PTR_MAP        16   // térkép: A a célkereszt alatt
+#define PTR_LEGEND     17   // térkép: − a jelmagyarázat gombján
 #define PTR_TAP        50   // egyszeri koppintás (hud_tap)
 
 // A játék eseményazonosítója: kamera forgatása (EvStickMove, dx/dy logikai képpontban)
@@ -352,6 +354,9 @@ static bool menu_cursor;               // a szabad kurzor van használatban (nin
 static void *cur_state;                // a játék legutóbb látott gxGameState-je
 static float cur_x, cur_y;
 static VTouch cur_touch;
+static uint8_t *map_page;              // a most látható térkép (CMapDisplay; különben NULL) – a célkereszthez
+static VTouch map_touch;               // térkép, A: koppintás a célkereszt alatt
+static VTouch legend_touch;            // térkép, −: koppintás a jelmagyarázat gombjára
 static uint64_t cur_active_ms;         // a kurzor utolsó mozgatása/használata
 static uint64_t last_poll_ms;
 
@@ -695,6 +700,9 @@ static void release_all_virtual(void) {
     camera_finger_release();
     vtouch_release(&cur_touch, PTR_CURSOR);
     vtouch_release(&focus_touch, PTR_FOCUS);
+    vtouch_release(&map_touch, PTR_MAP);
+    vtouch_release(&legend_touch, PTR_LEGEND);
+    map_page = NULL;
 }
 
 // ---------------------------------------------------------------------------
@@ -820,6 +828,11 @@ static const struct {
 };
 #define TOUCH_CLASS_COUNT ((int)(sizeof(touch_class) / sizeof(touch_class[0])))
 #define TOUCH_CLASS_HUD_FIRST 14   // a CButtonShoot sora: a HUD-osztályokra nem kell kurzor
+#define TOUCH_CLASS_MAP       9    // a szünetmenü lapjai (a fül egyetlen gyereke)
+#define TOUCH_CLASS_QUESTS    10
+#define TOUCH_CLASS_INVENTORY 11
+#define TOUCH_CLASS_UPGRADES  12
+#define TOUCH_CLASS_STATS     13
 static const void *touch_class_vt[TOUCH_CLASS_COUNT];
 
 static int touch_class_of(const void *obj) {
@@ -1060,20 +1073,31 @@ static void set_focus(int idx) {
     focus_obj = mbtn[idx].obj;
 }
 
+// A szünetmenü fülsorának füle (a képernyő felső szélén). Ezek között az L/R vált, a D-pad nem lép rájuk – különben
+// egy függőleges menüből jobbra/balra nyomva a fülsorra ugrana a fókusz (pl. a Súgó almenüjében).
+static bool is_tabbar(const MenuBtn *m) {
+    return touch_class_of(m->obj) == TAB_CLASS && m->y0 == 0 && m->x0 >= 0 && m->y1 >= 20;
+}
+
 // A from gombtól az adott irányba eső legközelebbi gomb (a középpontok alapján, ~60°-os kúpban).
 static int nearest_button(int from, int dir) {
     const MenuBtn *f = &mbtn[from];
+    bool from_tabbar = is_tabbar(f);
     float cx = (f->x0 + f->x1) * 0.5f, cy = (f->y0 + f->y1) * 0.5f;
     float dx = dpad_dir[dir][0], dy = dpad_dir[dir][1];
     int best = -1;
     float best_score = 1e9f;
     for (int i = 0; i < mbtn_count; i++) {
-        if (i == from)
+        if (i == from || (!from_tabbar && is_tabbar(&mbtn[i])))
             continue;
         float vx_ = (mbtn[i].x0 + mbtn[i].x1) * 0.5f - cx, vy_ = (mbtn[i].y0 + mbtn[i].y1) * 0.5f - cy;
         float along = vx_ * dx + vy_ * dy;
         float perp = fabsf(vx_ * dy - vy_ * dx);
         if (along < 2.0f || perp > along * 1.8f)
+            continue;
+        // balra/jobbra csak ugyanabba a sorba (Igen/Nem, Resume/Back): ha arra nincs gomb, a játék kapja az akciót
+        // (súgó-lapozó, csúszka, lista) – különben pl. a súgó jobb szélső lapozónyilára ugrana a fókusz
+        if (dx != 0.0f && fabsf(vy_) * 2.0f > fmaxf(f->y1 - f->y0, mbtn[i].y1 - mbtn[i].y0))
             continue;
         float score = along + perp * 2.0f;
         if (score < best_score) {
@@ -1084,10 +1108,14 @@ static int nearest_button(int from, int dir) {
     return best;
 }
 
-// Alapértelmezett fókusz: a legfelső (azonos sorban a bal szélső) gomb.
+// Alapértelmezett fókusz: a legfelső (azonos sorban a bal szélső) gomb, a fülsoron kívül (ha van más).
 static void focus_default(void) {
-    int best = -1;
+    int best = -1, non_tab = 0;
+    for (int i = 0; i < mbtn_count; i++)
+        non_tab += !is_tabbar(&mbtn[i]);
     for (int i = 0; i < mbtn_count; i++) {
+        if (non_tab && is_tabbar(&mbtn[i]))
+            continue;
         if (best < 0 || mbtn[i].y0 + mbtn[i].y1 < mbtn[best].y0 + mbtn[best].y1 - 4 ||
             (abs((mbtn[i].y0 + mbtn[i].y1) - (mbtn[best].y0 + mbtn[best].y1)) <= 4 && mbtn[i].x0 < mbtn[best].x0))
             best = i;
@@ -1101,6 +1129,10 @@ static void focus_default(void) {
 static void nav_move(int dir) {
     rule_pending = NULL;
     if (focus_idx < 0) {
+        if (dir >= 2) {   // balra/jobbra fókusz nélkül: a játéké (pl. a súgó lapozója)
+            *menu_action = dir_action[dir];
+            return;
+        }
         focus_default();
         return;
     }
@@ -1165,16 +1197,174 @@ static void poll_cursor(u64 down, u64 up, float lx, float ly, uint64_t now, floa
             *menu_action = dir_action[i];
 }
 
+// A szünetmenü listás lapjai (a fül egyetlen gyereke; GS_InGameMenu+0x10 CTabControl: +0x8c/+0x90 a fülek, +0x98 a
+// mostani; CTab+0xb4/+0xb8 a gyerekei). A leltár (4 oszlopos rács), a fegyverek (Weapons: görgetett lista) és a
+// statisztika saját kontrolleres utat ad: a menu_action 45–48-ra a kijelölés lép / a lista görget (CInventoryDisplay
+// 0x27dd88, CUpgradesDisplay 0x28c118, CScrollBar::Update 0x286608). Itt a D-pad/bal kar ezt kapja, nem a gombok
+// közti fókuszlépést; az A a lap gombja: leltárban a „Use” (+0x8c, csak ha kirajzolódik – használható tárgynál),
+// fegyvereknél az „Equip” (+0x88). A két gomb +0x74-es fókuszát a játék állítja (a leltár csak fókusszal nyomja meg
+// a menu_action 49-re), ezt nem vesszük el.
+#define TABCTL_TABS 0x8c
+#define TABCTL_CUR  0x98
+#define TAB_KIDS    0xb4
+#define INV_USE_BTN 0x8c
+#define UPG_EQUIP_BTN 0x88
+
+static int ingame_page(void *state, uint8_t **display) {
+    *display = NULL;
+    if (!state || !vt_ingame_menu || *(const void **)state != vt_ingame_menu)
+        return -1;
+    const uint8_t *tc = *(uint8_t **)((char *)state + 0x10);
+    if (!tc)
+        return -1;
+    void *const *tb = *(void *const *const *)(tc + TABCTL_TABS), *const *te = *(void *const *const *)(tc + TABCTL_TABS + 4);
+    int cur = *(const int *)(tc + TABCTL_CUR);
+    if (!tb || te < tb || te - tb > 16 || cur < 0 || cur >= te - tb || !tb[cur])
+        return -1;
+    const uint8_t *tab = tb[cur];
+    void *const *kb = *(void *const *const *)(tab + TAB_KIDS), *const *ke = *(void *const *const *)(tab + TAB_KIDS + 4);
+    if (!kb || ke <= kb || ke - kb > 64 || !kb[0])
+        return -1;
+    int cls = touch_class_of(kb[0]);
+    if (cls < TOUCH_CLASS_MAP || cls > TOUCH_CLASS_STATS)
+        return -1;
+    *display = kb[0];
+    return cls;
+}
+
+// A listás lap gombja (Use/Equip), ha most kirajzolt és engedélyezett: az mbtn indexe, különben -1.
+#define INV_SELECTED  0xa0   // int: a kijelölt elem indexe
+#define INV_ITEMS     0x94   // std::vector, 20 bájtos elemek: +0x0c a tárgy típusa (1 = használható)
+#define INV_ITEM_SIZE 20
+
+static int list_action_button(int page, const uint8_t *disp) {
+    const void *btn = NULL;
+    if (page == TOUCH_CLASS_INVENTORY) {
+        // a „Use” csak használható (1-es típusú) kijelölt tárgynál él; a gombja akkor is fogadja az érintést, ha nem
+        // rajzolódik ki, és egy oda eső felengedés később, egy használható tárgyon sülne el
+        const uint8_t *b = *(uint8_t *const *)(disp + INV_ITEMS), *e = *(uint8_t *const *)(disp + INV_ITEMS + 4);
+        int sel = *(const int *)(disp + INV_SELECTED);
+        if (!b || e < b || sel < 0 || (e - b) / INV_ITEM_SIZE <= sel ||
+            *(const int *)(b + sel * INV_ITEM_SIZE + 0x0c) != 1)
+            return -1;
+        btn = *(void *const *)(disp + INV_USE_BTN);
+    }
+    else if (page == TOUCH_CLASS_UPGRADES)
+        btn = *(void *const *)(disp + UPG_EQUIP_BTN);
+    for (int i = 0; btn && i < mbtn_count; i++)
+        if (mbtn[i].obj == btn)
+            return i;
+    return -1;
+}
+
+// ---------------------------------------------------------------------------
+// A térkép lapja (CMapDisplay, a szünetmenü 4. füle; a minitérkép is ezt nyitja). Nincs nagyítás és utazás; van
+// görgetés, egy saját útjelző (koppintásra lerak / áthelyez / a jelére koppintva töröl), jelmagyarázat, „vissza a
+// játékoshoz” és lóhívás. A játék kontrolleres útja (CMapDisplay::Update 0x281424): a menu_action 45–48 görget
+// (gyorsulva), az 57 középre áll, az 56 lovat hív. Az útjelzőnek nincs ilyen útja: a térkép közepére koppintunk, ott
+// célkereszt van (gl.c). Mezők: +0x08 téglalap, +0x90 jelmagyarázat-állapot (0 zárva), +0xb8/+0xbc/+0xc0 a
+// jelmagyarázat / középre / ló gombja, +0xd8 a lépték, +0xdc/+0xe0 a görgetés, +0xe4/+0xe8 a játékos helye; a
+// húzás 40 egységen túl a pálya tutorial-szövegét (CLevel+0x1a5c/+0x1a60) törli – ezt mi is megtesszük.
+#define MAP_LEGEND_STATE 0x90
+#define MAP_LEGEND_BTN   0xb8
+#define MAP_CENTER_BTN   0xbc
+#define MAP_HORSE_BTN    0xc0
+#define MAP_SCALE        0xd8
+#define MAP_PAN          0xdc
+#define MAP_ORIGIN       0xe4
+#define LEVEL_MAP_TUTORIAL 0x1a5c
+#define LEVEL_MAP_HIDDEN   0x1acc   // byte: a térkép rejtve (a játék görgetése és húzása is csak 0-nál megy)
+enum { MA_MAP_HORSE = 56, MA_MAP_CENTER = 57 };
+#define MAP_STICK_SPEED 510.0f   // teljes kitérésnél ennyi léptéknyi egység/s (a D-pad csúcsa 17/képkocka, 30 fps)
+
+static void (*MapDisplay_UpdatePosition)(void *map);
+
+static bool map_center(const uint8_t *map, int *x, int *y) {
+    const int16_t *r = (const int16_t *)(map + BTN_RECT);
+    if (r[2] <= r[0] || r[3] <= r[1])
+        return false;
+    *x = (r[0] + r[2]) / 2;
+    *y = (r[1] + r[3]) / 2;
+    return true;
+}
+
+bool controls_map_crosshair(const void *map, int *x, int *y) {
+    if (!menu_mode || menu_cursor || !map_page || (map && map != map_page))
+        return false;
+    void *level = CLevel_GetLevel();
+    if (level && *((const uint8_t *)level + LEVEL_MAP_HIDDEN))
+        return false;   // a pálya szkriptje elrejtette a térképet
+    return *(const int *)(map_page + MAP_LEGEND_STATE) == 0 && map_center(map_page, x, y);
+}
+
+static void poll_map(uint8_t *map, u64 buttons, u64 down, u64 up, float lx, float ly, float dt) {
+    void *level = CLevel_GetLevel();
+    bool hidden = level && *((const uint8_t *)level + LEVEL_MAP_HIDDEN);
+    bool legend_closed = *(const int *)(map + MAP_LEGEND_STATE) == 0;
+    bool moved = false;
+    // az L/R (fülváltás) ebben a képkockában a menu_action-t már beírta: azt nem írjuk felül
+    bool tab_switch = down & (HidNpadButton_L | HidNpadButton_R | HidNpadButton_ZL | HidNpadButton_ZR);
+    // D-pad: a játék saját görgetése (amíg nyomva van, minden képkockában; gyorsul)
+    for (int i = 0; i < 4 && !tab_switch; i++)
+        if (buttons & dpad_hid[i]) {
+            *menu_action = dir_action[i];
+            moved = true;
+            break;
+        }
+    // bal kar: folyamatos görgetés, átlósan is (négyzetes görbe a finom mozgáshoz)
+    float m = sqrtf(lx * lx + ly * ly);
+    if (m > 0.0f && MapDisplay_UpdatePosition && !hidden) {
+        float *pan = (float *)(map + MAP_PAN);
+        float k = MAP_STICK_SPEED * *(const float *)(map + MAP_SCALE) * m * dt;
+        pan[0] += lx * k;
+        pan[1] += ly * k;
+        MapDisplay_UpdatePosition(map);
+        moved = true;
+    }
+    if (moved && !hidden) {
+        const float *pan = (const float *)(map + MAP_PAN), *org = (const float *)(map + MAP_ORIGIN);
+        if (level && (fabsf(pan[0] - org[0]) > 40.0f || fabsf(pan[1] - org[1]) > 40.0f)) {
+            *(int *)((char *)level + LEVEL_MAP_TUTORIAL) = 0;
+            *(int *)((char *)level + LEVEL_MAP_TUTORIAL + 4) = 0;
+        }
+    }
+    // A: útjelző a célkereszt alatt (lenyomás és felengedés ugyanott – a játék ±10 egységen belül koppintásnak veszi)
+    int cx, cy;
+    if ((down & HidNpadButton_A) && legend_closed && !hidden && map_center(map, &cx, &cy)) {
+        vtouch_press(&map_touch, PTR_MAP, l2sx(cx), l2sy(cy));
+        menu_log("térkép: útjelző (%d,%d)", cx, cy);
+    }
+    if (up & HidNpadButton_A)
+        vtouch_release(&map_touch, PTR_MAP);
+    // Y: vissza a játékoshoz, X: ló (a gombok saját gyorsbillentyűje)
+    if ((down & HidNpadButton_Y) && !tab_switch)
+        *menu_action = MA_MAP_CENTER;
+    if ((down & HidNpadButton_X) && !tab_switch)
+        *menu_action = MA_MAP_HORSE;
+    // −: jelmagyarázat be/ki (a gombja mozog, mindig a mostani helyére koppintunk)
+    const uint8_t *legend = *(uint8_t **)(map + MAP_LEGEND_BTN);
+    if ((down & HidNpadButton_Minus) && legend && legend[BTN_ENABLED]) {
+        int sx, sy;
+        btn_center(legend, &sx, &sy);
+        vtouch_press(&legend_touch, PTR_LEGEND, sx, sy);
+    }
+    if (up & HidNpadButton_Minus)
+        vtouch_release(&legend_touch, PTR_LEGEND);
+}
+
 static void poll_menu(u64 buttons, u64 down, u64 up, HidAnalogStickState ls, uint64_t now, float dt) {
     float lx = ls.x / (float)JOYSTICK_MAX;
     float ly = -ls.y / (float)JOYSTICK_MAX;    // a HID-ben a felfelé pozitív, a képernyőn lefelé
     coord_normalize(&lx, &ly, settings.left_deadzone, 1.0f);
 
     menu_scan(cur_state);
+    map_page = NULL;   // lent, a lap felismerésekor állítjuk újra (a térkép a menü bezárásakor megszűnik)
     bool use_cursor = cursor_forced || mbtn_count == 0;
     if (use_cursor != menu_cursor) {
         vtouch_release(&cur_touch, PTR_CURSOR);
         vtouch_release(&focus_touch, PTR_FOCUS);
+        vtouch_release(&map_touch, PTR_MAP);
+        vtouch_release(&legend_touch, PTR_LEGEND);
         menu_cursor = use_cursor;
         nav_dir = -1;
         rule_pending = NULL;
@@ -1198,6 +1388,34 @@ static void poll_menu(u64 buttons, u64 down, u64 up, HidAnalogStickState ls, uin
         return;
     }
 
+    // Listás lap (leltár, fegyverek, statisztika): az irány a játék kijelölését lépteti, az A a lap gombja.
+    uint8_t *disp = NULL;
+    int page = ingame_page(cur_state, &disp);
+    bool list_page = page == TOUCH_CLASS_INVENTORY || page == TOUCH_CLASS_UPGRADES || page == TOUCH_CLASS_STATS;
+    map_page = page == TOUCH_CLASS_MAP ? disp : NULL;
+    if (!map_page) {
+        vtouch_release(&map_touch, PTR_MAP);
+        vtouch_release(&legend_touch, PTR_LEGEND);
+    }
+    if (map_page && menu_action) {
+        // a térképen nincs gombok közti fókusz-lépés (a D-pad görget); a gombjeleket a labels_update teszi ki
+        vtouch_release(&focus_touch, PTR_FOCUS);   // ha egy másik lapon nyomott A-val érkeztünk ide
+        vtouch_release(&cur_touch, PTR_CURSOR);
+        focus_idx = -1;
+        focus_obj = NULL;
+        rule_pending = NULL;
+        nav_dir = -1;
+        poll_map(map_page, buttons, down, up, lx, ly, dt);
+        return;
+    }
+    if (list_page) {
+        rule_pending = NULL;
+        focus_idx = list_action_button(page, disp);
+        focus_obj = focus_idx >= 0 ? mbtn[focus_idx].obj : NULL;
+        if (focus_idx >= 0)
+            ((uint8_t *)mbtn[focus_idx].obj)[BTN_FOCUS] = 1;
+    }
+
     // A játék szabálya szerint lépnie kellett volna, de a fókusz maradt (a gomb Update-je nem fut,
     // vagy a célgomb nem fókuszálható): akkor lépünk mi.
     if (rule_pending) {
@@ -1219,20 +1437,32 @@ static void poll_menu(u64 buttons, u64 down, u64 up, HidAnalogStickState ls, uin
             dir = i;
     if (dir < 0 && fmaxf(fabsf(lx), fabsf(ly)) > 0.5f)
         dir = fabsf(ly) >= fabsf(lx) ? (ly < 0 ? 0 : 1) : (lx < 0 ? 2 : 3);
+    if (list_page && focus_touch.held)
+        dir = -1;   // amíg az A a lap gombján van, a kijelölés nem mozdul (a felengedés a másik tárgyra sülne el)
+    // ha ebben a képkockában L/R fület vált (menu_action 52/53), az irány nem írja felül
+    bool tab_switch = down & (HidNpadButton_L | HidNpadButton_R | HidNpadButton_ZL | HidNpadButton_ZR);
     if (dir != nav_dir) {
         nav_dir = dir;
-        if (dir >= 0) {
-            nav_move(dir);
+        if (dir >= 0 && !tab_switch) {
+            if (list_page)
+                *menu_action = dir_action[dir];
+            else
+                nav_move(dir);
             nav_next_ms = now + 400;
         }
-    } else if (dir >= 0 && now >= nav_next_ms) {
-        nav_move(dir);
+    } else if (dir >= 0 && now >= nav_next_ms && !tab_switch) {
+        if (list_page)
+            *menu_action = dir_action[dir];
+        else
+            nav_move(dir);
         nav_next_ms = now + 150;
     }
 
     // A: koppintás a fókuszban lévő gomb közepére; felengedés ugyanott.
     if (down & HidNpadButton_A) {
-        if (focus_idx < 0) {
+        if (list_page && focus_idx < 0) {
+            // a lapnak most nincs gombja (pl. nem használható tárgy): semmi
+        } else if (focus_idx < 0) {
             focus_default();
         } else if (mbtn[focus_idx].tap) {
             const MenuBtn *m = &mbtn[focus_idx];
@@ -1308,21 +1538,33 @@ static bool cinematic_point(int vb, int *sx, int *sy) {
 //  - L/R: a szünetmenü fülsorának két szélső füle (mellé, kívülre).
 
 #define INGAME_RESUME_BTN 0x48
-#define LABEL_MAX 6
-static struct { const void *obj; uint16_t glyph; } label[LABEL_MAX];
+#define LABEL_MAX 8
+static struct { const void *obj; uint16_t glyph; uint8_t side; } label[LABEL_MAX];
 static int label_count;
 
-static void label_add(const void *obj, uint16_t glyph) {
+static void label_add_side(const void *obj, uint16_t glyph, int side) {
     if (obj && label_count < LABEL_MAX) {
         label[label_count].obj = obj;
+        label[label_count].side = (uint8_t)side;
         label[label_count++].glyph = glyph;
     }
+}
+
+static void label_add(const void *obj, uint16_t glyph) {
+    label_add_side(obj, glyph, 0);
 }
 
 uint16_t controls_button_glyph(const void *obj) {
     for (int i = 0; i < label_count; i++)
         if (label[i].obj == obj)
             return label[i].glyph;
+    return 0;
+}
+
+int controls_button_glyph_side(const void *obj) {
+    for (int i = 0; i < label_count; i++)
+        if (label[i].obj == obj)
+            return label[i].side;
     return 0;
 }
 
@@ -1369,6 +1611,14 @@ static void labels_update(void) {
         return;
     }
     label_add(back_button(cur_state), GLYPH_B);   // elöl: ha a fókusz épp a vissza-gombon van, az B marad
+    if (map_page) {   // a térkép gombjai: jelmagyarázat −, középre Y, ló X (az ikongombok mellé; nyitott
+                      // jelmagyarázatnál ezek alatta vannak, a jelük sem kell)
+        label_add(*(void **)(map_page + MAP_LEGEND_BTN), GLYPH_MINUS);
+        if (*(const int *)(map_page + MAP_LEGEND_STATE) == 0) {
+            label_add_side(*(void **)(map_page + MAP_CENTER_BTN), GLYPH_Y, 1);
+            label_add_side(*(void **)(map_page + MAP_HORSE_BTN), GLYPH_X, 2);
+        }
+    }
     // a fülsor (a szünetmenü teteje): legalább két, a képernyő felső szélén álló fül-lap; a bal szélsőre L, a
     // jobb szélsőre R (a rejtett, (-8,-10)-es fül-lapok kimaradnak)
     const MenuBtn *first = NULL, *last = NULL;
@@ -1742,6 +1992,7 @@ void controls_init(void) {
     PC_EnterAimMode = game_sym("_ZN15PlayerComponent12EnterAimModeEv");
     joy_max_distance = game_sym("_ZN14AnalogJoystick12MAX_DISTANCEE");
     walk_distance_scale = game_sym_opt("_ZN13CGameSettings27s_walkJoystickDistanceScaleE");
+    MapDisplay_UpdatePosition = game_sym_opt("_ZN11CMapDisplay14UpdatePositionEv");
 
     screen_scale_w = game_sym_opt("s_screenScaleW");
     screen_scale_h = game_sym_opt("s_screenScaleH");
@@ -1774,7 +2025,11 @@ void controls_init(void) {
         touch_class_vt[i] = game_vtable(touch_class[i].sym);
     if (strcmp(touch_class[TAB_CLASS].name, "CTab") || strcmp(touch_class[TOUCH_CLASS_SPR].name, "CButtonSpr") ||
         strcmp(touch_class[TOUCH_CLASS_DIALOG].name, "CDialogTextBox") ||
-        strcmp(touch_class[TOUCH_CLASS_HUD_FIRST].name, "CButtonShoot"))
+        strcmp(touch_class[TOUCH_CLASS_HUD_FIRST].name, "CButtonShoot") ||
+        strcmp(touch_class[TOUCH_CLASS_MAP].name, "CMapDisplay") || strcmp(touch_class[TOUCH_CLASS_QUESTS].name, "CQuestsDisplay") ||
+        strcmp(touch_class[TOUCH_CLASS_INVENTORY].name, "CInventoryDisplay") ||
+        strcmp(touch_class[TOUCH_CLASS_UPGRADES].name, "CUpgradesDisplay") ||
+        strcmp(touch_class[TOUCH_CLASS_STATS].name, "CStatisticsDisplay"))
         fatal_error("controls: a touch_class[] sorrendje nem egyezik a *_CLASS indexekkel");
 
     update_scale();
@@ -2003,6 +2258,12 @@ bool controls_focus_rect(int *x, int *y, int *w, int *h) {
 }
 
 bool controls_cursor(int *x, int *y) {
+    int mx, my;
+    if (controls_map_crosshair(NULL, &mx, &my)) {   // a térkép célkeresztje (A: útjelző)
+        *x = l2sx(mx);
+        *y = l2sy(my);
+        return true;
+    }
     if (!menu_mode || !menu_cursor)
         return false;
     // töltőképernyőn soha: a töltés végén a játék már a GS_Loading listájára teszi a pálya gombjait (Skip,

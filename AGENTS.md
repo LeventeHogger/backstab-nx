@@ -39,7 +39,8 @@ nem verziózott `HANDOFF.md` (ha van); visszafejtett részletek: `docs/visszafej
   `shadertest` (1/2/3: a VertexAnim-növényzet piros / köd nélkül / fehér fénnyel), `autoinput` (időzített
   gombnyomások, pl. a mentés betöltése gépelés nélkül: „40:SHOT 1:A 8:A …”; nyomva tartás „ZL/3000”, kar „LS0,-50”,
   „WAITSKIP” = vár a következő átvezetőre – `controls.c`; ha van, a bevezető videó kimarad), `evlog` (a játék
-  eseményei játékmenetben: melyik gomb mit küld), `noglyphpatch` (a gombjel-képkockák átállítása nélkül). A `leveltest` és az
+  eseményei játékmenetben: melyik gomb mit küld), `noglyphpatch` (a gombjel-képkockák átállítása nélkül), `glyphtest` (a főmenün az összes gombjel-képkocka
+  rácsban, sorszámmal – autoinput SHOT-tal egy képen ellenőrizhető). A `leveltest` és az
   `autoinput` SHOT-ja képkockát ment (`shots/*.rgba` → `tools/dev/shot2png.py`): így a teszthez nem kell a képernyőt
   fotózni, és billentyűt sem kell az Eden-ablakba küldeni. A debug-build a GL-t is figyeli
   (`dynlib.c`): le nem forduló shaderek, minden shader forrása `sdmc:/switch/backstab/shaders/<hash>.glsl`, köd- és
@@ -83,6 +84,10 @@ nem verziózott `HANDOFF.md` (ha van); visszafejtett részletek: `docs/visszafej
   „második” gomb tiltva van, a lövés a helyén álló `CButtonSweep` (ide koppint a ZR); a ZL nyomva tartva célzás, a
   felengedés elteszi. A séta fix sebességű, a játék küszöbe |kitérés| 0,10–0,95 (`PlayerComponent`+0x2f0): a kar
   85%-áig ebbe a sávba képezünk. Esemény-azonosítók és mérések: `docs/visszafejtes.md`.
+  A szünetmenü lapjai (`controls.c` `ingame_page`): a leltár/fegyverek/statisztika a játék saját menu_action-útját
+  kapja (45–48), nem a fókuszlépést; a térkép (`poll_map`) görgetés + célkereszt-koppintás (útjelző) + 56/57-es
+  gyorsbillentyű. A port `CGameSettings::s_hasDpad`-et 1-re állítja (mint a valódi Xperia Play), a súgók pedig csak a
+  kontrolleres oldalakat kapják (`patch.c` `help_pages_patch`: négy átírt utasítás + a `GS_Help` hookja).
 - **Gombjelek a játék feliratain:** a `patch.c` a `CButtonSpr::Draw` idejére a felirat (+0x88) elé teszi a
   `\x02<képkocka>` ikont (`port.h` `GLYPH_*`: a glyphs.c Switch-jelei), és utána visszaállítja – a játék
   objektumába tartósan nem írunk (a felszabadított gombokba írás memóriát rontana). Melyik gombra mi kerül: `controls.c`
@@ -91,7 +96,9 @@ nem verziózott `HANDOFF.md` (ha van); visszafejtett részletek: `docs/visszafej
   a szöveg marad, az ikont a `DrawString`-hook külön rajzolja elé; a horgonybitek: `docs/visszafejtes.md`.
   Az `interface` textúraatlaszban nincs szabad hely: ahol két súgójel közös modulon osztozott (mozgás/nézelődés,
   L1/R1), a `patch.c` `glyph_frames_patch` a képkockát memóriában az érintéses súgó (kontrolleres módban soha meg
-  nem jelenő) moduljára állítja át (tükrözés-jelzővel együtt), a képet a `make-glyphs.py` rajzolja oda.
+  nem jelenő) moduljára állítja át (tükrözés-jelzővel együtt), a képet a `make-glyphs.py` rajzolja oda; minden
+  gombjel három méretváltozatát (a HUD-tippek ezek között animálnak). A szünetmenü saját Xperia-jeleit (417/420/449/
+  426/465) a rajzolás idejére elrejti.
 - **Az 1080p-s adatcsomag `eu_font_*` fontjai nem eredetiek** (utólag gyártottak: hiányzó à é ß, a
   „small” nagyobb a „medium”-nál). Az eredeti a Gameloft 1280×800-as csomagjában van; a játék a fontot nem skálázza
   (NoScale modulméret, a sorköz is abból), ezért 1080/800-szoros modulokkal pontosan az eredeti arány jön ki.

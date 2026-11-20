@@ -23,6 +23,8 @@ GLYPHS = {
     253: (1878, 523, 19, 18, "A"),       # ○  – kontra         → A (jobbra)
     349: (178, 601, 13, 12, "X"),        # kis △
     311: (191, 601, 13, 12, "A"),        # kis ○
+    310: (1808, 265, 11, 11, "Y"),       # kis □ (a kis jelek: 307–309-es alap + 310/311/349/350)
+    350: (1808, 254, 10, 11, "B"),       # kis ×
     256: (262, 601, 37, 10, "+"),        # START  → +
     255: (457, 608, 46, 10, "-"),        # SELECT → −
     # Az Xperia D-pad karjai (pajzs alakú nyíl) → a bal Joy-Con kerek iránygombjai: a tippek (mászás, mozgás,
@@ -43,6 +45,10 @@ GLYPHS = {
     # A szünetmenü fülsorának L/R jele (a port saját felirata, port.h GLYPH_L/GLYPH_R): két érintéses súgóikon helyén.
     319: (92, 1875, 44, 50, "tab:L"),
     313: (46, 1875, 46, 50, "tab:R"),
+    # SELECT/START (340–345: az Xperia kis pirulája + felirat, három méretben) → kerek −/+ gomb a többi gomb
+    # stílusában; a patch.c mindhárom méretet erre a két (érintéses súgóbeli) modulra állítja.
+    331: (1981, 1815, 57, 55, "btn:-"),
+    335: (1514, 1822, 56, 54, "btn:+"),
 }
 
 # a játék gombjainak színei (az interface.pvr 240-es moduljából mérve)
@@ -86,7 +92,7 @@ def render_button(kind, w, h):
     d = ImageDraw.Draw(img)
     cx, cy = W / 2, H / 2
     full = min(W, H) / 2
-    glow = kind.endswith("g") or kind.startswith("stick")
+    glow = kind.endswith("g") or kind.startswith("stick") or kind.startswith("btn:")
     rb = full * (0.62 if glow else 0.9)    # a gomb sugara (a fényudvar nélkül)
     if kind.startswith("stick"):
         rb = 26.4 * SS                     # a 86×85-ös eredeti modul 0,62-es aránya: a két kar egyforma méretű
@@ -100,7 +106,13 @@ def render_button(kind, w, h):
     d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=BTN_RING)
     r = rb * 0.76
     d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=BTN_FILL)
-    if kind.startswith("dpad"):            # tömör nyílhegy a gomb közepén
+    if kind.startswith("btn:"):            # −/+ jel a gomb közepén
+        a = rb * 0.42
+        t = rb * 0.16
+        d.rounded_rectangle((cx - a, cy - t / 2, cx + a, cy + t / 2), radius=t / 2, fill=INK)
+        if kind.endswith("+"):
+            d.rounded_rectangle((cx - t / 2, cy - a, cx + t / 2, cy + a), radius=t / 2, fill=INK)
+    elif kind.startswith("dpad"):          # tömör nyílhegy a gomb közepén
         a = rb * 0.42
         if "<" in kind:
             pts = [(cx - a, cy), (cx + a * 0.7, cy - a * 0.95), (cx + a * 0.7, cy + a * 0.95)]
@@ -192,7 +204,7 @@ def render(ch, w, h):
         return render_pill(ch[5:], w, h, 100, 34)
     if ch.startswith("tab:"):              # fülsor: L/R (44–46 széles modul)
         return render_pill(ch[4:], w, h, 40, 28, glow=False)
-    if ch.startswith("dpad") or ch.startswith("stick"):
+    if ch.startswith("dpad") or ch.startswith("stick") or ch.startswith("btn:"):
         return render_button(ch, w, h)
     W, H = w * SS, h * SS
     side = min(W, H)                       # a betűk négyzetben, középre; a +/− a teljes magasságban
